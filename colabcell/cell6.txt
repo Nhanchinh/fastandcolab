@@ -1,0 +1,90 @@
+## Cell 6: FastAPI Server
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List
+import time
+
+app = FastAPI(title="Colab Summarization Server")
+
+
+class SummarizeRequest(BaseModel):
+    text: str
+    model: str  # "phobert_vit5", "vit5", "qwen", "phobert_vit5_paraphrase"
+    max_length: Optional[int] = 256
+    preprocessed_sentences: Optional[List[str]] = None
+
+
+class SummarizeResponse(BaseModel):
+    summary: str
+    model_used: str
+    inference_time_ms: float
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "gpu": torch.cuda.is_available(),
+        "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "models_loaded": ["vit5", "vit5_paraphrase", "phobert", "qwen"]
+    }
+
+
+@app.post("/summarize", response_model=SummarizeResponse)
+async def summarize(req: SummarizeRequest):
+    """
+    Endpoint tóm tắt văn bản
+
+    - model: "vit5", "phobert_vit5", "phobert_vit5_paraphrase", hoặc "qwen"
+    - text: văn bản cần tóm tắt
+    - max_length: độ dài tối đa của tóm tắt
+    - preprocessed_sentences: danh sách câu (dùng cho phobert_vit5 và phobert_vit5_paraphrase)
+    """
+    start_time = time.time()
+
+    try:
+        if req.model == "vit5":
+            summary = generate_vit5(req.text, req.max_length)
+
+        elif req.model == "phobert_vit5":
+            sentences = req.preprocessed_sentences
+            if not sentences:
+                sentences = [s.strip() for s in req.text.split('.') if s.strip()]
+            summary = generate_phobert_vit5(sentences, req.max_length)
+
+        elif req.model == "phobert_vit5_paraphrase":
+            sentences = req.preprocessed_sentences
+            if not sentences:
+                sentences = [s.strip() for s in req.text.split('.') if s.strip()]
+            summary = generate_phobert_vit5_paraphrase(sentences, req.max_length)
+
+        elif req.model == "qwen":
+            summary = generate_qwen(req.text, req.max_length)
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown model: {req.model}. Supported: vit5, phobert_vit5, phobert_vit5_paraphrase, qwen"
+            )
+
+        inference_time = (time.time() - start_time) * 1000
+
+        return SummarizeResponse(
+            summary=summary,
+            model_used=req.model,
+            inference_time_ms=inference_time
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi inference: {str(e)}"
+        )
+
+
+print("✅ FastAPI server đã sẵn sàng!")
+print(f"📡 Endpoints:")
+print(f"   GET  /health     - Health check")
+print(f"   POST /summarize  - Tóm tắt văn bản")
+print(f"   Models: vit5, phobert_vit5, phobert_vit5_paraphrase, qwen")

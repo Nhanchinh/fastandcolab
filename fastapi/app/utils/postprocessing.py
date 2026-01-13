@@ -187,6 +187,7 @@ def get_postprocessor(model_type: str) -> BasePostprocessor:
     postprocessors = {
         "vit5": ViT5Postprocessor(),
         "phobert_vit5": PhoBertViT5Postprocessor(),
+        "phobert_vit5_paraphrase": PhoBertViT5Postprocessor(),  # Dùng chung postprocessor với phobert_vit5
         "qwen": QwenPostprocessor(),
     }
     

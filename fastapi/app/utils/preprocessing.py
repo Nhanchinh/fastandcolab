@@ -165,6 +165,7 @@ def get_preprocessor(model_type: str) -> BasePreprocessor:
     preprocessors = {
         "vit5": ViT5Preprocessor(),
         "phobert_vit5": PhoBertViT5Preprocessor(),
+        "phobert_vit5_paraphrase": PhoBertViT5Preprocessor(),  # Dùng chung preprocessor với phobert_vit5
         "qwen": QwenPreprocessor(),
     }
     

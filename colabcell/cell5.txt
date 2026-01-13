@@ -1,0 +1,189 @@
+## Cell 5: Định nghĩa các hàm generate
+
+from typing import List
+import re
+
+def generate_vit5(text: str, max_length: int = 256) -> str:
+    """Sinh tóm tắt bằng ViT5"""
+    # Thêm prefix nếu chưa có
+    if not text.startswith("summarize:"):
+        text = f"summarize: {text}"
+
+    inputs = vit5_tokenizer(
+        text,
+        return_tensors="pt",
+        max_length=1024,
+        truncation=True
+    ).to(device)
+
+    outputs = vit5_model.generate(
+        **inputs,
+        max_length=max_length,
+        min_length=30,
+        num_beams=4,
+        length_penalty=1.0,
+        early_stopping=True,
+        no_repeat_ngram_size=3,
+        repetition_penalty=2.0,
+        do_sample=False
+    )
+
+    summary = vit5_tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    # Loại bỏ garbage characters
+    summary = re.sub(r'[^\w\s.,!?àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÈÉẺẼẸÊẾỀỂỄỆÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸỴĐ]', '', summary)
+    summary = re.sub(r'\s+', ' ', summary).strip()
+
+    return summary
+
+
+def score_sentences_with_phobert(sentences: List[str]) -> List[tuple]:
+    """Đánh giá độ quan trọng của từng câu bằng PhoBERT"""
+    scored = []
+
+    for sent in sentences:
+        inputs = phobert_tokenizer(
+            sent,
+            return_tensors="pt",
+            max_length=256,
+            truncation=True,
+            padding=True
+        ).to(device)
+
+        with torch.no_grad():
+            outputs = phobert_model(**inputs)
+            score = outputs.last_hidden_state.mean().item()
+
+        scored.append((score, sent))
+
+    return scored
+
+
+def generate_phobert_vit5(sentences: List[str], max_length: int = 256) -> str:
+    """Sinh tóm tắt hybrid: PhoBERT ranking + ViT5 generation"""
+    if not sentences:
+        return ""
+
+    scored = score_sentences_with_phobert(sentences)
+    scored.sort(reverse=True, key=lambda x: x[0])
+
+    top_k = max(1, int(len(scored) * 0.6))
+    selected = [s for _, s in scored[:top_k]]
+    combined_text = " ".join(selected)
+
+    return generate_vit5(combined_text, max_length)
+
+
+def paraphrase_chunk(text: str, max_length: int = 256) -> str:
+    """Paraphrase một chunk text bằng ViT5 Paraphrase"""
+    # Thêm prefix "làm mượt: "
+    input_text = "làm mượt: " + text.strip()
+
+    inputs = paraphrase_tokenizer(
+        input_text,
+        return_tensors="pt",
+        max_length=256,
+        truncation=True
+    ).to(device)
+
+    outputs = paraphrase_model.generate(
+        **inputs,
+        max_length=max_length,
+        min_length=20,
+        num_beams=5,
+        repetition_penalty=1.1,
+        early_stopping=True
+    )
+
+    result = paraphrase_tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    # Fix lỗi tokenizer (COVID-19 -> Saxifrag-19)
+    result = result.replace("Saxifrag-19", "COVID-19")
+    result = result.replace("Saxifrag", "COVID")
+
+    return result.strip()
+
+
+def generate_phobert_vit5_paraphrase(sentences: List[str], max_length: int = 256, chunk_size: int = 3) -> str:
+    """
+    Sinh tóm tắt hybrid: PhoBERT extract + ViT5 Paraphrase
+
+    Pipeline:
+    1. PhoBERT đánh giá và chọn câu quan trọng
+    2. Chia thành chunks (mỗi chunk 3 câu)
+    3. ViT5 Paraphrase làm mượt từng chunk với prefix "làm mượt: "
+    4. Ghép các chunks lại
+    """
+    if not sentences:
+        return ""
+
+    # Step 1: PhoBERT scoring và ranking
+    scored = score_sentences_with_phobert(sentences)
+    scored.sort(reverse=True, key=lambda x: x[0])
+
+    # Lấy top 60% câu quan trọng
+    top_k = max(1, int(len(scored) * 0.6))
+    selected = [s for _, s in scored[:top_k]]
+
+    # Step 2: Chia thành chunks và paraphrase
+    paraphrased_parts = []
+
+    for i in range(0, len(selected), chunk_size):
+        chunk_sentences = selected[i:i + chunk_size]
+        raw_chunk = " ".join(chunk_sentences)
+
+        # Step 3: Paraphrase chunk
+        smooth_chunk = paraphrase_chunk(raw_chunk, max_length=max_length)
+        paraphrased_parts.append(smooth_chunk)
+
+    # Step 4: Ghép lại
+    final_text = " ".join(paraphrased_parts)
+
+    return final_text
+
+
+def generate_qwen(text: str, max_length: int = 256) -> str:
+    """Sinh tóm tắt bằng Qwen2.5-3B"""
+    messages = [
+        {
+            "role": "system",
+            "content": "Bạn là trợ lý tóm tắt văn bản tiếng Việt. Hãy tóm tắt ngắn gọn, súc tích, giữ lại các ý chính quan trọng nhất."
+        },
+        {
+            "role": "user",
+            "content": f"Tóm tắt văn bản sau:\n\n{text}"
+        }
+    ]
+
+    prompt = qwen_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = qwen_tokenizer(prompt, return_tensors="pt").to(device)
+
+    outputs = qwen_model.generate(
+        **inputs,
+        max_new_tokens=max_length,
+        do_sample=True,
+        temperature=0.7,
+        top_p=0.9,
+        repetition_penalty=1.1
+    )
+
+    full_response = qwen_tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    if "assistant" in full_response.lower():
+        response = full_response.split("assistant")[-1].strip()
+    else:
+        response = full_response[len(prompt):].strip()
+
+    return response
+
+
+print("✅ Các hàm generate đã sẵn sàng!")
+print("   - generate_vit5")
+print("   - generate_phobert_vit5")
+print("   - generate_phobert_vit5_paraphrase ⭐ NEW")
+print("   - generate_qwen")

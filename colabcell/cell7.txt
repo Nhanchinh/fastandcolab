@@ -1,0 +1,21 @@
+import nest_asyncio
+import uvicorn
+import asyncio
+
+# Apply nest_asyncio để chạy trong Colab
+nest_asyncio.apply()
+
+print("🚀 Đang khởi động server...")
+print(f"🌐 Public URL: {PUBLIC_URL}")
+print(f"\n📝 Test endpoints:")
+print(f"   Health: {PUBLIC_URL}/health")
+print(f"   Docs:   {PUBLIC_URL}/docs")
+print("\n⚠️ ĐỪNG TẮT NOTEBOOK NÀY KHI ĐANG SỬ DỤNG!")
+print("=" * 50)
+
+# Chạy server với config
+config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+server = uvicorn.Server(config)
+
+# Chạy trong event loop hiện tại
+await server.serve()

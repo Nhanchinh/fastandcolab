@@ -1,0 +1,43 @@
+## Cell 3: Setup ngrok và Auto-update URL lên Gist
+#Setup ngrok và Auto-update URL lên Gist
+import requests
+from pyngrok import ngrok
+
+# Thiết lập ngrok
+ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+
+# Đóng tunnel cũ nếu có
+ngrok.kill()
+
+# Tạo tunnel mới
+tunnel = ngrok.connect(8000)
+PUBLIC_URL = tunnel.public_url
+
+print(f"🌐 Public URL: {PUBLIC_URL}")
+
+# Auto-update URL lên GitHub Gist
+def update_gist_url(url):
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    data = {
+        "files": {
+            "colab_url.txt": {
+                "content": url
+            }
+        }
+    }
+    resp = requests.patch(
+        f"https://api.github.com/gists/{GIST_ID}",
+        json=data,
+        headers=headers
+    )
+    if resp.status_code == 200:
+        print(f"✅ URL đã được cập nhật lên Gist!")
+        print(f"   Gist: https://gist.github.com/{GIST_ID}")
+    else:
+        print(f"❌ Lỗi cập nhật Gist: {resp.status_code}")
+        print(resp.text)
+
+update_gist_url(PUBLIC_URL)

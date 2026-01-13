@@ -1,0 +1,61 @@
+# Cell 4: Load models
+
+import torch
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    AutoModel,
+    BitsAndBytesConfig  # Thêm để quantize
+)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"🖥️ Device: {device}")
+if device == "cuda":
+    print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+
+# Load ViT5 Model
+print("\n📦 Loading ViT5 (vietnews-summarization)...")
+vit5_tokenizer = AutoTokenizer.from_pretrained("VietAI/vit5-base-vietnews-summarization")
+vit5_model = AutoModelForSeq2SeqLM.from_pretrained("VietAI/vit5-base-vietnews-summarization").to(device)
+print("   ✅ ViT5 loaded!")
+
+# Load ViT5 Paraphrase Model
+print("\n📦 Loading ViT5 Paraphrase...")
+paraphrase_tokenizer = AutoTokenizer.from_pretrained("tncinh/my-vit5-paraphrase")
+paraphrase_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/my-vit5-paraphrase").to(device)
+print("   ✅ ViT5 Paraphrase loaded!")
+
+# Load PhoBERT Model
+print("\n📦 Loading PhoBERT...")
+phobert_tokenizer = AutoTokenizer.from_pretrained("vinai/phobert-base")
+phobert_model = AutoModel.from_pretrained("vinai/phobert-base").to(device)
+print("   ✅ PhoBERT loaded!")
+
+# Load Qwen 7B với 4-bit quantization để tiết kiệm VRAM
+print("\n📦 Loading Qwen2.5-7B (4-bit quantized)...")
+
+# Cấu hình 4-bit quantization
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True  # Tiết kiệm thêm VRAM
+)
+
+qwen_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+qwen_model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen2.5-7B-Instruct",
+    quantization_config=bnb_config,
+    device_map="auto",
+    trust_remote_code=True
+)
+print("   ✅ Qwen 7B loaded! (4-bit quantized)")
+
+# In VRAM usage
+if device == "cuda":
+    print(f"\n📊 VRAM đang dùng: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    print(f"   VRAM còn trống: {(torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated()) / 1024**3:.2f} GB")
+
+print("\n🎉 TẤT CẢ MODELS ĐÃ SẴN SÀNG!")

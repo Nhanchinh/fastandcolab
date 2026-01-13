@@ -1,0 +1,8 @@
+## Cell 2: Cài đặt thư viện
+# Cài đặt các thư viện cần thiết
+!pip install -q fastapi uvicorn pyngrok nest-asyncio
+!pip install -q transformers torch accelerate
+!pip install -q bitsandbytes accelerate
+!pip install -q underthesea  # Vietnamese NLP
+
+print("✅ Đã cài đặt thư viện!")

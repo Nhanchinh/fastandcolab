@@ -1,0 +1,11 @@
+## Cell 1: Cấu hình (CẦN ĐIỀN THÔNG TIN)
+# Ngrok auth token (lấy từ https://dashboard.ngrok.com/get-started/your-authtoken)
+NGROK_AUTH_TOKEN = "YOUR_NGROK_TOKEN_HERE"  # ← THAY THẾ
+
+# GitHub Gist để lưu URL
+GIST_ID = "YOUR_GIST_ID_HERE"  # Gist ID của bạn
+
+# GitHub Personal Access Token (có gist scope)
+GITHUB_TOKEN = "YOUR_GITHUB_TOKEN_HERE"  # ← THAY THẾ (ghp_...)
+
+print("✅ Cấu hình đã sẵn sàng!")
