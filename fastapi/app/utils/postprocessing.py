@@ -88,9 +88,69 @@ class BasePostprocessor(ABC):
 class ViT5Postprocessor(BasePostprocessor):
     """Postprocessor cho model ViT5"""
     
+    def _fix_date_format(self, text: str) -> str:
+        """
+        Fix lỗi ngày tháng bị mất dấu /
+        VD: 1852023 -> 18/5/2023, 206 -> 20/6, 245 -> 24/5
+        """
+        import re
+        
+        # Fix ngày ngắn (không có năm): 206 -> 20/6, 245 -> 24/5, 117 -> 11/7
+        def fix_short_date(match):
+            s = match.group(0)
+            if len(s) == 3:  # dd/m format (206 -> 20/6)
+                day, month = s[:2], s[2]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 9:
+                    return f"{day}/{month}"
+            elif len(s) == 4:  # dd/mm format (2406 -> 24/06)
+                day, month = s[:2], s[2:]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 12:
+                    return f"{day}/{month}"
+            return s
+        
+        # Fix ngày đầy đủ (có năm): 1852023 -> 18/5/2023
+        def fix_full_date(match):
+            s = match.group(0)
+            if len(s) == 7:  # dd/m/yyyy
+                day, month, year = s[:2], s[2], s[3:]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 9:
+                    return f"{day}/{month}/{year}"
+                # Thử d/mm/yyyy
+                day, month, year = s[0], s[1:3], s[3:]
+                if 1 <= int(day) <= 9 and 1 <= int(month) <= 12:
+                    return f"{day}/{month}/{year}"
+            elif len(s) == 8:  # dd/mm/yyyy
+                day, month, year = s[:2], s[2:4], s[4:]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 12:
+                    return f"{day}/{month}/{year}"
+            return s
+        
+        # Fix ngày đầy đủ trước (7-8 số)
+        text = re.sub(r'\b(\d{7,8})\b', fix_full_date, text)
+        
+        # Fix ngày ngắn (3-4 số) - mở rộng context: ngày, là, trước, sau
+        def replace_short(m):
+            original = m.group(2)
+            if len(original) == 3:
+                day, month = original[:2], original[2]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 9:
+                    return m.group(1) + f"{day}/{month}"
+            elif len(original) == 4:
+                day, month = original[:2], original[2:]
+                if 1 <= int(day) <= 31 and 1 <= int(month) <= 12:
+                    return m.group(1) + f"{day}/{month}"
+            return m.group(0)
+        
+        text = re.sub(r'(ngày\s+|là\s+|trước\s+|sau\s+)(\d{3,4})\b', replace_short, text, flags=re.IGNORECASE)
+        
+        return text
+    
     def postprocess(self, summary: str, **kwargs) -> dict:
         # Clean basic
         cleaned = clean_output(summary)
+        
+        # Fix date format (1852023 -> 18/5/2023)
+        cleaned = self._fix_date_format(cleaned)
         
         # Remove repetition (ViT5 đôi khi lặp)
         cleaned = remove_repetition(cleaned)

@@ -107,3 +107,36 @@ class UserService:
         
         return await self.user_repository.delete_user(user_id)
 
+    async def get_user_by_id(self, user_id: str) -> UserPublic:
+        """
+        Lấy thông tin user theo ID (cho /me endpoint)
+        """
+        user = await self.user_repository.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        return UserPublic(
+            id=user["_id"],
+            email=user["email"],
+            full_name=user.get("full_name"),
+            role=user.get("role", "user")
+        )
+
+    async def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
+        """
+        Đổi mật khẩu user
+        - Verify mật khẩu hiện tại
+        - Hash mật khẩu mới và cập nhật
+        """
+        user = await self.user_repository.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        # Verify mật khẩu hiện tại
+        if not verify_password(current_password, user.get("hashed_password", "")):
+            raise ValueError("Current password is incorrect")
+        
+        # Hash và cập nhật mật khẩu mới
+        new_hashed_password = hash_password(new_password)
+        return await self.user_repository.update_password(user_id, new_hashed_password)
+

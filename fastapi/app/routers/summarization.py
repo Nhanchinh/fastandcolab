@@ -3,8 +3,8 @@ Summarization Router
 API endpoints cho chức năng tóm tắt văn bản
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from typing import List, Optional
 
 from app.schemas.summarization import (
     SummarizeRequest,
@@ -13,7 +13,9 @@ from app.schemas.summarization import (
     AvailableModel,
     ModelType
 )
+from app.schemas.batch import BatchUploadResponse
 from app.services.summarization_service import SummarizationService, get_summarization_service
+from app.services.batch_service import BatchService, get_batch_service
 
 
 router = APIRouter(prefix="/summarization", tags=["summarization"])
@@ -79,3 +81,74 @@ async def get_models(
     """
     models = service.get_available_models()
     return [AvailableModel(**m) for m in models]
+
+
+@router.post("/batch-upload", response_model=BatchUploadResponse)
+async def batch_upload(
+    file: UploadFile = File(..., description="File CSV hoặc Excel chứa dataset"),
+    model: str = Form(default="vit5", description="Model sử dụng: vit5, phobert_vit5, qwen"),
+    max_length: int = Form(default=256, ge=50, le=512),
+    text_column: str = Form(default="text", description="Tên cột chứa văn bản cần tóm tắt"),
+    reference_column: Optional[str] = Form(default=None, description="Tên cột chứa tóm tắt tham chiếu (optional)"),
+    batch_service: BatchService = Depends(get_batch_service)
+) -> BatchUploadResponse:
+    """
+    Upload file CSV/Excel để đánh giá dataset lớn.
+    
+    **File format:**
+    - CSV hoặc Excel (.xlsx, .xls)
+    - Phải có cột chứa văn bản (mặc định: 'text')
+    - Có thể có cột tóm tắt tham chiếu (optional)
+    
+    **Ví dụ CSV:**
+    ```
+    text,reference_summary
+    "Văn bản cần tóm tắt 1","Tóm tắt tham chiếu 1"
+    "Văn bản cần tóm tắt 2","Tóm tắt tham chiếu 2"
+    ```
+    
+    Returns:
+        BatchUploadResponse với kết quả cho từng item
+    """
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ hỗ trợ file CSV, XLSX, XLS"
+        )
+    
+    # Validate model
+    try:
+        model_type = ModelType(model)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model: {model}. Supported: vit5, phobert_vit5, qwen"
+        )
+    
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Process batch
+        result = await batch_service.process_batch(
+            file_content=file_content,
+            filename=file.filename,
+            model=model_type,
+            max_length=max_length,
+            text_column=text_column,
+            reference_column=reference_column
+        )
+        
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi xử lý batch: {str(e)}"
+        )

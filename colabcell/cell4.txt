@@ -15,10 +15,10 @@ if device == "cuda":
     print(f"   GPU: {torch.cuda.get_device_name(0)}")
     print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 
-# Load ViT5 Model (Finetuned trên 10k samples)
-print("\n📦 Loading ViT5 (finetuned vietnews-summarization)...")
-vit5_tokenizer = AutoTokenizer.from_pretrained("tncinh/vit5-vietnews-summarization")
-vit5_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/vit5-vietnews-summarization").to(device)
+# Load ViT5 Model (Finetuned + Logic Fixed)
+print("\n📦 Loading ViT5 (logic-fixed)...")
+vit5_tokenizer = AutoTokenizer.from_pretrained("tncinh/vit5-logic-fixed")
+vit5_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/vit5-logic-fixed").to(device)
 print("   ✅ ViT5 loaded!")
 
 # Load ViT5 Paraphrase Model

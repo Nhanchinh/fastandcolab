@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.database.connection import close_mongo_connection, connect_to_mongo, get_database
 from app.routers.admin import router as admin_router
@@ -20,6 +21,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FastAPI Auth with MongoDB", lifespan=lifespan)
+
+# Cấu hình CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Trong production nên set cụ thể domain frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 app.include_router(auth_router)

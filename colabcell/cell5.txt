@@ -19,12 +19,12 @@ def generate_vit5(text: str, max_length: int = 256) -> str:
     outputs = vit5_model.generate(
         **inputs,
         max_length=max_length,
-        min_length=30,
-        num_beams=4,
-        length_penalty=1.0,
+        min_length=50,              # Tăng để summary đầy đủ hơn
+        num_beams=6,                # Tăng từ 4 để chất lượng cao hơn
+        length_penalty=1.2,         # Khuyến khích output dài hơn, đầy đủ hơn
         early_stopping=True,
         no_repeat_ngram_size=3,
-        repetition_penalty=2.0,
+        repetition_penalty=1.5,     # Giảm từ 2.0 để tránh cắt xén quá mức
         do_sample=False
     )
 

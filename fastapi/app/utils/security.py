@@ -8,8 +8,10 @@ from passlib.context import CryptContext
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
+JWT_REFRESH_SECRET_KEY = os.getenv("JWT_REFRESH_SECRET_KEY", "refresh-secret-change-me")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "60"))
+REFRESH_TOKEN_EXPIRES_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "7"))
 
 
 def hash_password(password: str) -> str:
@@ -27,8 +29,17 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
     if expires_delta is None:
         expires_delta = timedelta(minutes=JWT_EXPIRES_MINUTES)
     expire = datetime.now(timezone.utc) + expires_delta
-    to_encode: Dict[str, Any] = {"sub": subject, "exp": int(expire.timestamp())}
+    to_encode: Dict[str, Any] = {"sub": subject, "exp": int(expire.timestamp()), "type": "access"}
     return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def create_refresh_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Tạo refresh token với thời hạn dài hơn access token"""
+    if expires_delta is None:
+        expires_delta = timedelta(days=REFRESH_TOKEN_EXPIRES_DAYS)
+    expire = datetime.now(timezone.utc) + expires_delta
+    to_encode: Dict[str, Any] = {"sub": subject, "exp": int(expire.timestamp()), "type": "refresh"}
+    return jwt.encode(to_encode, JWT_REFRESH_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> Dict[str, Any]:
@@ -45,3 +56,12 @@ def get_user_id_from_token(token: str) -> str:
     return payload.get("sub")
 
 
+def decode_refresh_token(token: str) -> Dict[str, Any]:
+    """Decode và verify refresh token"""
+    try:
+        payload = jwt.decode(token, JWT_REFRESH_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise ValueError("Invalid token type")
+        return payload
+    except JWTError as exc:
+        raise ValueError("Invalid refresh token") from exc

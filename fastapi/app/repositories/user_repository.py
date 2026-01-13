@@ -47,4 +47,12 @@ class UserRepository:
         result = await self._collection.delete_one({"_id": ObjectId(user_id)})
         return result.deleted_count > 0
 
+    async def update_password(self, user_id: str, new_hashed_password: str) -> bool:
+        """Cập nhật mật khẩu user"""
+        result = await self._collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"hashed_password": new_hashed_password}}
+        )
+        return result.modified_count > 0
+
 
