@@ -44,3 +44,32 @@ class AvailableModel(BaseModel):
     id: ModelType
     name: str
     description: str
+
+
+class CompareRequest(BaseModel):
+    """Request body cho API so sánh models"""
+    text: str = Field(..., min_length=10, description="Văn bản tiếng Việt cần tóm tắt")
+    models: List[ModelType] = Field(
+        default=[ModelType.VIT5, ModelType.PHOBERT_VIT5, ModelType.QWEN],
+        description="Danh sách models cần so sánh (mặc định: vit5, phobert_vit5, qwen)"
+    )
+    max_length: Optional[int] = Field(default=256, ge=50, le=512, description="Độ dài tối đa")
+
+
+class ModelCompareResult(BaseModel):
+    """Kết quả tóm tắt của 1 model"""
+    model: ModelType
+    summary: str
+    inference_time_ms: float
+    inference_time_s: float
+    error: Optional[str] = None
+
+
+class CompareResponse(BaseModel):
+    """Response body từ API so sánh models"""
+    original_text: str
+    preprocessed_text: str
+    results: List[ModelCompareResult]
+    total_time_ms: float
+    total_time_s: float
+    metadata: Dict[str, Any] = Field(default_factory=dict)

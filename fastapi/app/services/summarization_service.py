@@ -6,7 +6,14 @@ Orchestrate preprocessing -> Colab call -> postprocessing
 import time
 from typing import Dict, Any
 
-from app.schemas.summarization import ModelType, SummarizeRequest, SummarizeResponse
+from app.schemas.summarization import (
+    ModelType, 
+    SummarizeRequest, 
+    SummarizeResponse,
+    CompareRequest,
+    CompareResponse,
+    ModelCompareResult
+)
 from app.services.colab_client import ColabClient, get_colab_client
 from app.utils.preprocessing import get_preprocessor
 from app.utils.postprocessing import get_postprocessor
@@ -85,6 +92,71 @@ class SummarizationService:
                     if k != "summary"
                 },
                 "colab_model": colab_response.get("model_used", model_type)
+            }
+        )
+    
+    async def compare_models(self, request: CompareRequest) -> CompareResponse:
+        """
+        So sánh kết quả tóm tắt của nhiều models.
+        Chạy tuần tự từng model để tiết kiệm RAM/GPU.
+        """
+        start_time = time.time()
+        results = []
+        
+        # Preprocessing chung (dùng cho tất cả models)
+        preprocessor = get_preprocessor("vit5")  # Dùng preprocessor chung
+        preprocess_result = preprocessor.preprocess(
+            text=request.text,
+            max_length=request.max_length
+        )
+        
+        # Chạy tuần tự từng model
+        for model_type in request.models:
+            model_start = time.time()
+            
+            try:
+                # Tạo request cho từng model
+                model_request = SummarizeRequest(
+                    text=request.text,
+                    model=model_type,
+                    max_length=request.max_length
+                )
+                
+                # Gọi summarize cho model này
+                summary_response = await self.summarize(model_request)
+                
+                model_time_ms = (time.time() - model_start) * 1000
+                
+                results.append(ModelCompareResult(
+                    model=model_type,
+                    summary=summary_response.summary,
+                    inference_time_ms=model_time_ms,
+                    inference_time_s=round(model_time_ms / 1000, 2),
+                    error=None
+                ))
+                
+            except Exception as e:
+                # Nếu model lỗi, vẫn tiếp tục với model khác
+                model_time_ms = (time.time() - model_start) * 1000
+                results.append(ModelCompareResult(
+                    model=model_type,
+                    summary="",
+                    inference_time_ms=model_time_ms,
+                    inference_time_s=round(model_time_ms / 1000, 2),
+                    error=str(e)
+                ))
+        
+        total_time_ms = (time.time() - start_time) * 1000
+        
+        return CompareResponse(
+            original_text=request.text,
+            preprocessed_text=preprocess_result.get("processed_text", request.text),
+            results=results,
+            total_time_ms=total_time_ms,
+            total_time_s=round(total_time_ms / 1000, 2),
+            metadata={
+                "models_count": len(request.models),
+                "models": [m.value for m in request.models]
             }
         )
     

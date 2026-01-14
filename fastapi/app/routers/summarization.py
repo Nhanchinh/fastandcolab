@@ -11,7 +11,9 @@ from app.schemas.summarization import (
     SummarizeResponse,
     ColabHealthResponse,
     AvailableModel,
-    ModelType
+    ModelType,
+    CompareRequest,
+    CompareResponse
 )
 from app.schemas.batch import BatchUploadResponse
 from app.services.summarization_service import SummarizationService, get_summarization_service
@@ -52,6 +54,32 @@ async def summarize(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi xử lý: {str(e)}"
+        )
+
+
+@router.post("/compare", response_model=CompareResponse)
+async def compare_models(
+    request: CompareRequest,
+    service: SummarizationService = Depends(get_summarization_service)
+) -> CompareResponse:
+    """
+    So sánh kết quả tóm tắt của nhiều models.
+    
+    - **text**: Văn bản cần tóm tắt
+    - **models**: Danh sách models muốn so sánh (mặc định: vit5, phobert_vit5, qwen)
+    - **max_length**: Độ dài tối đa
+    
+    Chạy tuần tự từng model để tiết kiệm RAM/GPU.
+    
+    Returns:
+        CompareResponse với kết quả từ tất cả models
+    """
+    try:
+        return await service.compare_models(request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi so sánh models: {str(e)}"
         )
 
 
