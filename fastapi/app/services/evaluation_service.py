@@ -92,24 +92,36 @@ class EvaluationService:
         Returns:
             Dict chứa rouge1, rouge2, rougeL (F1 scores)
         """
+        # Handle empty inputs
+        if not predictions or not references:
+            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
+        
+        # Check for empty strings - return 0 scores
+        if all(not p.strip() for p in predictions) or all(not r.strip() for r in references):
+            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
+        
         self._load_rouge_bleu()
         
         # CRITICAL: Tách từ tiếng Việt trước khi tính ROUGE
         preds_tokenized = self.preprocess_vietnamese(predictions)
         refs_tokenized = self.preprocess_vietnamese(references)
         
-        results = self.rouge.compute(
-            predictions=preds_tokenized,
-            references=refs_tokenized,
-            use_stemmer=False  # Không dùng stemmer cho tiếng Việt
-        )
-        
-        # Extract F1 scores
-        return {
-            'rouge1': results['rouge1'],
-            'rouge2': results['rouge2'],
-            'rougeL': results['rougeL']
-        }
+        try:
+            results = self.rouge.compute(
+                predictions=preds_tokenized,
+                references=refs_tokenized,
+                use_stemmer=False  # Không dùng stemmer cho tiếng Việt
+            )
+            
+            # Extract F1 scores
+            return {
+                'rouge1': results['rouge1'],
+                'rouge2': results['rouge2'],
+                'rougeL': results['rougeL']
+            }
+        except Exception as e:
+            logger.warning(f"ROUGE calculation failed: {e}")
+            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
     
     def calculate_bleu(
         self,
@@ -126,21 +138,44 @@ class EvaluationService:
         Returns:
             BLEU score (0-1)
         """
+        # Handle empty inputs - CRITICAL: prevents ZeroDivisionError
+        if not predictions or not references:
+            return 0.0
+        
+        # Check for empty strings - return 0 score
+        if all(not p.strip() for p in predictions) or all(not r.strip() for r in references):
+            return 0.0
+        
         self._load_rouge_bleu()
         
         # CRITICAL: Tách từ tiếng Việt trước khi tính BLEU
         preds_tokenized = self.preprocess_vietnamese(predictions)
         refs_tokenized = self.preprocess_vietnamese(references)
         
+        # Filter out empty tokenized strings to prevent ZeroDivisionError
+        valid_pairs = [(p, r) for p, r in zip(preds_tokenized, refs_tokenized) 
+                       if p.strip() and r.strip()]
+        
+        if not valid_pairs:
+            return 0.0
+        
+        valid_preds, valid_refs = zip(*valid_pairs)
+        
         # BLEU expects references to be list of lists
-        refs_formatted = [[ref] for ref in refs_tokenized]
+        refs_formatted = [[ref] for ref in valid_refs]
         
-        results = self.bleu.compute(
-            predictions=preds_tokenized,
-            references=refs_formatted
-        )
-        
-        return results['bleu']
+        try:
+            results = self.bleu.compute(
+                predictions=list(valid_preds),
+                references=refs_formatted
+            )
+            return results['bleu']
+        except ZeroDivisionError:
+            logger.warning("BLEU calculation got ZeroDivisionError - returning 0.0")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"BLEU calculation failed: {e}")
+            return 0.0
     
     def calculate_bertscore(
         self,
@@ -199,6 +234,18 @@ class EvaluationService:
         """
         start_time = time.time()
         
+        # Handle empty inputs - return zeros
+        if not prediction or not reference or not prediction.strip() or not reference.strip():
+            logger.warning(f"Empty prediction or reference detected. Pred len: {len(prediction or '')}, Ref len: {len(reference or '')}")
+            return {
+                'rouge1': 0.0,
+                'rouge2': 0.0,
+                'rougeL': 0.0,
+                'bleu': 0.0,
+                'bert_score': 0.0,
+                'processing_time_ms': int((time.time() - start_time) * 1000)
+            }
+        
         # Wrap strings in lists for batch processing
         preds = [prediction]
         refs = [reference]
@@ -210,7 +257,11 @@ class EvaluationService:
         # Tính BERTScore (optional vì rất chậm)
         bert_score = 0.0
         if calculate_bert:
-            bert_score = self.calculate_bertscore(preds, refs, batch_size=batch_size)
+            try:
+                bert_score = self.calculate_bertscore(preds, refs, batch_size=batch_size)
+            except Exception as e:
+                logger.warning(f"BERTScore calculation failed: {e}")
+                bert_score = 0.0
         
         processing_time = int((time.time() - start_time) * 1000)
         

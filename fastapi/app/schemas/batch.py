@@ -15,10 +15,18 @@ class BatchItemResult(BaseModel):
     original_text: str
     summary: str
     reference_summary: Optional[str] = None  # Tóm tắt tham chiếu (nếu có)
-    model_used: ModelType
-    inference_time_s: float
+    model_used: Optional[ModelType] = None
+    inference_time_s: float = 0.0
     success: bool = True
     error: Optional[str] = None
+    
+    # Evaluation Metrics (Optional)
+    # Evaluation Metrics (Optional)
+    rouge1: Optional[float] = None
+    rouge2: Optional[float] = None
+    rougeL: Optional[float] = None
+    bleu: Optional[float] = None
+    bert_score: Optional[float] = None
 
 
 class BatchUploadResponse(BaseModel):
@@ -26,7 +34,7 @@ class BatchUploadResponse(BaseModel):
     total_items: int
     successful_items: int
     failed_items: int
-    model_used: ModelType
+    model_used: Optional[ModelType] = None
     total_time_s: float
     avg_time_per_item_s: float
     results: List[BatchItemResult]

@@ -2,7 +2,7 @@
 Evaluation Router - API endpoints cho đánh giá chất lượng tóm tắt
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
 
 from app.schemas.evaluation import (
     EvaluateSingleRequest,
@@ -13,8 +13,10 @@ from app.schemas.evaluation import (
     SummarizeAndEvaluateResponse
 )
 from app.schemas.summarization import ModelType, SummarizeRequest
+from app.schemas.batch import BatchUploadResponse
 from app.services.evaluation_service import EvaluationService, get_evaluation_service
 from app.services.summarization_service import SummarizationService, get_summarization_service
+from app.services.batch_service import BatchService, get_batch_service
 
 
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
@@ -137,3 +139,59 @@ async def summarize_and_evaluate(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi: {str(e)}")
+
+
+@router.post(
+    "/upload",
+    response_model=BatchUploadResponse,
+    summary="Upload file để đánh giá (Score Only)",
+    description="""
+    Upload file CSV/Excel chứa cột summary và reference để đánh giá chất lượng.
+    
+    **File format:**
+    - CSV hoặc Excel (.xlsx, .xls)
+    - Phải có cột 'summary' (văn bản tóm tắt)
+    - Phải có cột 'reference' (tóm tắt tham chiếu)
+    - Tên cột có thể tùy chỉnh
+    """,
+)
+async def evaluate_file(
+    file: UploadFile = File(..., description="File CSV hoặc Excel"),
+    calculate_bert: bool = Form(default=False, description="Tính BERTScore (chậm)"),
+    summary_column: str = Form(default="summary", description="Tên cột chứa văn bản tóm tắt"),
+    reference_column: str = Form(default="reference", description="Tên cột chứa tóm tắt tham chiếu"),
+    batch_service: BatchService = Depends(get_batch_service)
+):
+    """Đánh giá chất lượng tóm tắt từ file"""
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ hỗ trợ file CSV, XLSX, XLS"
+        )
+        
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Process evaluation
+        result = await batch_service.evaluate_from_file(
+            file_content=file_content,
+            filename=file.filename,
+            calculate_bert=calculate_bert,
+            summary_column=summary_column,
+            reference_column=reference_column
+        )
+        
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi xử lý file: {str(e)}"
+        )
