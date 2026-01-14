@@ -27,6 +27,14 @@ class HistoryCreate(BaseModel):
     colab_inference_ms: Optional[float] = Field(default=None, ge=0)
 
 
+class HumanEvalScores(BaseModel):
+    """Human evaluation scores (1-5 scale)"""
+    fluency: Optional[int] = Field(default=None, ge=1, le=5, description="Độ trôi chảy")
+    coherence: Optional[int] = Field(default=None, ge=1, le=5, description="Tính mạch lạc")
+    relevance: Optional[int] = Field(default=None, ge=1, le=5, description="Tính liên quan")
+    consistency: Optional[int] = Field(default=None, ge=1, le=5, description="Tính nhất quán")
+
+
 class FeedbackCreate(BaseModel):
     """Schema để thêm feedback cho history entry"""
     rating: RatingType = Field(..., description="Đánh giá: good/bad/neutral")
@@ -34,6 +42,10 @@ class FeedbackCreate(BaseModel):
     corrected_summary: Optional[str] = Field(
         default=None, 
         description="Bản tóm tắt đã sửa (dùng cho training)"
+    )
+    human_eval: Optional[HumanEvalScores] = Field(
+        default=None,
+        description="Điểm đánh giá thủ công (Fluency, Coherence, Relevance, Consistency)"
     )
 
 
@@ -65,6 +77,7 @@ class FeedbackResponse(BaseModel):
     comment: Optional[str] = None
     corrected_summary: Optional[str] = None
     feedback_at: datetime
+    human_eval: Optional[HumanEvalScores] = None
 
 
 class HistoryResponse(BaseModel):
@@ -116,3 +129,56 @@ class ExportDatasetResponse(BaseModel):
     total_items: int
     items: List[ExportItem]
     exported_at: datetime
+
+
+class HumanEvalExportItem(BaseModel):
+    """Item cho export human evaluation data"""
+    summary: str
+    model_used: ModelType
+    created_at: datetime
+    fluency: Optional[int] = None
+    coherence: Optional[int] = None
+    relevance: Optional[int] = None
+    consistency: Optional[int] = None
+    average_score: Optional[float] = None
+    overall_rating: RatingType
+    comment: Optional[str] = None
+
+
+class HumanEvalExportResponse(BaseModel):
+    """Response khi export human evaluation data"""
+    total_items: int
+    items: List[HumanEvalExportItem]
+    exported_at: datetime
+
+
+# ============= Analytics Schemas =============
+
+class ModelStats(BaseModel):
+    """Stats cho từng model"""
+    model: str
+    count: int
+    avg_compression_ratio: float
+    avg_processing_time_ms: float
+    good_count: int
+    bad_count: int
+    neutral_count: int
+
+
+class DailyCount(BaseModel):
+    """Số lượng theo ngày"""
+    date: str
+    count: int
+
+
+class AnalyticsResponse(BaseModel):
+    """Response cho analytics dashboard"""
+    total_summaries: int
+    total_with_feedback: int
+    feedback_rate: float
+    rating_distribution: dict  # {"good": x, "bad": y, "neutral": z}
+    model_distribution: dict  # {"vit5": x, "phobert_vit5": y, ...}
+    model_stats: List[ModelStats]
+    daily_counts: List[DailyCount]  # 30 ngày gần nhất
+    avg_compression_ratio: float
+    avg_processing_time_ms: float

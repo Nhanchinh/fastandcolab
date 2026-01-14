@@ -15,12 +15,31 @@ from app.schemas.history import (
     FeedbackCreate,
     ExportDatasetResponse,
     RatingType,
-    ModelType
+    ModelType,
+    AnalyticsResponse,
+    HumanEvalExportResponse
 )
 from app.services.history_service import HistoryService, get_history_service
 
 
 router = APIRouter(prefix="/history", tags=["history"])
+
+
+@router.get("/analytics", response_model=AnalyticsResponse)
+async def get_analytics(
+    service: HistoryService = Depends(get_history_service)
+) -> AnalyticsResponse:
+    """
+    Lấy thống kê tổng quan cho Analytics dashboard.
+    
+    Returns:
+        - Tổng số summaries
+        - Phân bố theo model
+        - Phân bố rating (good/bad/neutral)
+        - Stats từng model (compression ratio, processing time, ratings)
+        - Daily counts 30 ngày gần nhất
+    """
+    return await service.get_analytics()
 
 
 @router.post("", response_model=HistoryResponse, status_code=status.HTTP_201_CREATED)
@@ -100,6 +119,33 @@ async def export_bad_summaries(
         ExportDatasetResponse với danh sách items
     """
     return await service.export_bad_summaries(model=model, limit=limit)
+
+
+@router.get("/export/human-eval", response_model=HumanEvalExportResponse)
+async def export_human_eval(
+    model: Optional[ModelType] = Query(default=None, description="Filter theo model"),
+    limit: int = Query(default=500, ge=1, le=1000, description="Số lượng tối đa"),
+    service: HistoryService = Depends(get_history_service)
+) -> HumanEvalExportResponse:
+    """
+    Export các bản tóm tắt có Human Evaluation scores.
+    
+    **Use case:**
+    - Xuất data đánh giá thủ công (Fluency, Coherence, Relevance, Consistency)
+    - Phân tích chất lượng model theo human evaluation
+    - Sử dụng cho báo cáo/đồ án
+    
+    **Output:**
+    - Summary text
+    - Model used
+    - 4 tiêu chí đánh giá (1-5 điểm)
+    - Average score
+    - Overall rating & comment
+    
+    Returns:
+        HumanEvalExportResponse với danh sách items
+    """
+    return await service.export_human_eval(model=model, limit=limit)
 
 
 @router.get("/{history_id}", response_model=HistoryResponse)
