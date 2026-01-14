@@ -8,6 +8,7 @@ from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.summarization import router as summarization_router
 from app.routers.evaluation import router as evaluation_router
+from app.routers.history import router as history_router
 
 
 @asynccontextmanager
@@ -36,6 +37,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(summarization_router)
 app.include_router(evaluation_router)
+app.include_router(history_router)
 
 
 @app.get("/")
