@@ -5,6 +5,7 @@ API endpoints cho chức năng tóm tắt văn bản
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from typing import List, Optional
+from pydantic import BaseModel
 
 from app.schemas.summarization import (
     SummarizeRequest,
@@ -18,6 +19,29 @@ from app.schemas.summarization import (
 from app.schemas.batch import BatchUploadResponse
 from app.services.summarization_service import SummarizationService, get_summarization_service
 from app.services.batch_service import BatchService, get_batch_service
+from app.services.ai_judge_service import AIJudgeService, get_ai_judge_service
+
+
+# AI Judge schemas
+class AIJudgeSummary(BaseModel):
+    model: str
+    summary: str
+
+class AIJudgeRequest(BaseModel):
+    original_text: str
+    summaries: List[AIJudgeSummary]
+
+class AIJudgeRanking(BaseModel):
+    model: str
+    rank: int
+    score: int
+    reasoning: str
+
+class AIJudgeResponse(BaseModel):
+    winner: str
+    rankings: List[AIJudgeRanking]
+    detailed_analysis: str
+    processing_time_ms: int
 
 
 router = APIRouter(prefix="/summarization", tags=["summarization"])
@@ -82,6 +106,61 @@ async def compare_models(
             detail=f"Lỗi so sánh models: {str(e)}"
         )
 
+
+@router.post("/ai-judge", response_model=AIJudgeResponse)
+async def ai_judge(
+    request: AIJudgeRequest,
+    service: AIJudgeService = Depends(get_ai_judge_service)
+) -> AIJudgeResponse:
+    """
+    Sử dụng AI (Gemini) để so sánh và đánh giá các bản tóm tắt.
+    
+    - **original_text**: Văn bản gốc
+    - **summaries**: Danh sách các bản tóm tắt cần so sánh [{model, summary}]
+    
+    AI sẽ phân tích theo 4 tiêu chí: Fluency, Coherence, Relevance, Consistency
+    và xếp hạng các model từ tốt đến kém.
+    
+    Returns:
+        AIJudgeResponse với model thắng, rankings và phân tích chi tiết
+    """
+    if not service.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gemini API chưa được cấu hình. Vui lòng set GEMINI_API_KEY environment variable."
+        )
+    
+    if len(request.summaries) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cần ít nhất 2 bản tóm tắt để so sánh"
+        )
+    
+    try:
+        summaries_list = [{"model": s.model, "summary": s.summary} for s in request.summaries]
+        result = await service.judge_summaries(request.original_text, summaries_list)
+        return AIJudgeResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi AI Judge: {str(e)}"
+        )
+
+
+@router.get("/ai-models")
+async def list_ai_models(
+    service: AIJudgeService = Depends(get_ai_judge_service)
+):
+    """
+    Liệt kê các models Gemini có sẵn cho API key.
+    """
+    models = service.list_available_models()
+    return {"models": models}
 
 @router.get("/health", response_model=ColabHealthResponse)
 async def check_health(

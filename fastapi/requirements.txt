@@ -32,3 +32,6 @@ bert-score>=0.3.13
 # CSV/Excel processing
 pandas>=2.0.0
 openpyxl>=3.1.0
+
+# AI Judge (Gemini API)
+google-generativeai>=0.8.0
