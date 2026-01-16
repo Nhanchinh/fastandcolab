@@ -22,6 +22,7 @@ class UserInDB(UserBase):
     id: str
     full_name: Optional[str] = None
     role: UserRole = "user"
+    consent_share_data: bool = True  # Cho phép admin xem dữ liệu
 
 
 class UserPublic(UserBase):
@@ -29,6 +30,7 @@ class UserPublic(UserBase):
     id: str
     full_name: Optional[str] = None
     role: UserRole = "user"
+    consent_share_data: bool = True  # Cho phép admin xem dữ liệu
 
 
 class Token(BaseModel):
@@ -54,6 +56,12 @@ class ChangePasswordRequest(BaseModel):
     """Request đổi mật khẩu"""
     current_password: str = Field(min_length=6)
     new_password: str = Field(min_length=6)
+
+
+class UpdateSettingsRequest(BaseModel):
+    """Request cập nhật cài đặt user"""
+    consent_share_data: Optional[bool] = None  # Cho phép/không cho phép admin xem dữ liệu
+    full_name: Optional[str] = None
 
 
 class TokenPayload(BaseModel):

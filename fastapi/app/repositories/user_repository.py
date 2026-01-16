@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -15,7 +15,8 @@ class UserRepository:
             "email": email,
             "hashed_password": hashed_password,
             "full_name": full_name,
-            "role": role
+            "role": role,
+            "consent_share_data": True  # Mặc định cho phép chia sẻ
         }
         result = await self._collection.insert_one(doc)
         return str(result.inserted_id)
@@ -55,4 +56,25 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def update_user(self, user_id: str, update_data: Dict) -> bool:
+        """Cập nhật thông tin user (settings, profile)"""
+        result = await self._collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
+
+    async def get_users_with_consent(self) -> List[dict]:
+        """Lấy danh sách users cho phép chia sẻ dữ liệu (consent_share_data = true)"""
+        users = []
+        # Lấy users có consent_share_data = true hoặc không có field (mặc định là true)
+        async for user in self._collection.find({
+            "$or": [
+                {"consent_share_data": True},
+                {"consent_share_data": {"$exists": False}}  # Legacy users mặc định là true
+            ]
+        }):
+            user["_id"] = str(user["_id"])
+            users.append(user)
+        return users
 

@@ -34,7 +34,7 @@ class UserService:
             role=role
         )
 
-        return UserPublic(id=new_id, email=email, full_name=full_name, role=role)
+        return UserPublic(id=new_id, email=email, full_name=full_name, role=role, consent_share_data=True)
 
     async def authenticate_user(self, email: str, password: str) -> dict:
         """
@@ -68,7 +68,8 @@ class UserService:
                 id=existing["_id"],
                 email=existing["email"],
                 full_name=existing.get("full_name"),
-                role=existing.get("role", "user")
+                role=existing.get("role", "user"),
+                consent_share_data=existing.get("consent_share_data", True)
             )
 
         # Tạo user mới
@@ -80,7 +81,7 @@ class UserService:
             role=role
         )
 
-        return UserPublic(id=new_id, email=email, full_name=full_name, role=role)
+        return UserPublic(id=new_id, email=email, full_name=full_name, role=role, consent_share_data=True)
 
     async def get_all_users(self) -> List[UserPublic]:
         """
@@ -92,7 +93,8 @@ class UserService:
                 id=user["_id"],
                 email=user["email"],
                 full_name=user.get("full_name"),
-                role=user.get("role", "user")
+                role=user.get("role", "user"),
+                consent_share_data=user.get("consent_share_data", True)
             )
             for user in users
         ]
@@ -119,7 +121,8 @@ class UserService:
             id=user["_id"],
             email=user["email"],
             full_name=user.get("full_name"),
-            role=user.get("role", "user")
+            role=user.get("role", "user"),
+            consent_share_data=user.get("consent_share_data", True)
         )
 
     async def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
@@ -140,3 +143,48 @@ class UserService:
         new_hashed_password = hash_password(new_password)
         return await self.user_repository.update_password(user_id, new_hashed_password)
 
+    async def update_settings(self, user_id: str, consent_share_data: Optional[bool] = None, full_name: Optional[str] = None) -> UserPublic:
+        """
+        Cập nhật cài đặt user (privacy settings, profile)
+        """
+        user = await self.user_repository.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
+        
+        # Build update dict
+        update_data = {}
+        if consent_share_data is not None:
+            update_data["consent_share_data"] = consent_share_data
+        if full_name is not None:
+            update_data["full_name"] = full_name
+        
+        if not update_data:
+            # Nothing to update, return current user
+            return UserPublic(
+                id=user["_id"],
+                email=user["email"],
+                full_name=user.get("full_name"),
+                role=user.get("role", "user"),
+                consent_share_data=user.get("consent_share_data", True)
+            )
+        
+        # Update in database
+        await self.user_repository.update_user(user_id, update_data)
+        
+        # Return updated user
+        updated_user = await self.user_repository.get_user_by_id(user_id)
+        return UserPublic(
+            id=updated_user["_id"],
+            email=updated_user["email"],
+            full_name=updated_user.get("full_name"),
+            role=updated_user.get("role", "user"),
+            consent_share_data=updated_user.get("consent_share_data", True)
+        )
+
+    async def get_consented_user_ids(self) -> List[str]:
+        """
+        Lấy danh sách user_id của những user cho phép chia sẻ dữ liệu
+        (Dùng cho admin khi query history)
+        """
+        users = await self.user_repository.get_users_with_consent()
+        return [user["_id"] for user in users]

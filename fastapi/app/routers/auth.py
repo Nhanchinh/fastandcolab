@@ -8,6 +8,7 @@ from app.schemas.user import (
     TokenWithRefresh,
     RefreshTokenRequest,
     ChangePasswordRequest,
+    UpdateSettingsRequest,
     UserCreate,
     UserPublic
 )
@@ -159,6 +160,43 @@ async def change_password(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to change password")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.put("/settings", response_model=UserPublic)
+async def update_settings(
+    payload: UpdateSettingsRequest,
+    user_id: str = Depends(get_current_user_id),
+    user_service: UserService = Depends(get_user_service)
+) -> UserPublic:
+    """
+    Cập nhật cài đặt user (privacy, profile)
+    
+    - **consent_share_data**: Cho phép admin xem dữ liệu của bạn (true/false)
+    - **full_name**: Tên hiển thị
+    """
+    try:
+        updated_user = await user_service.update_settings(
+            user_id=user_id,
+            consent_share_data=payload.consent_share_data,
+            full_name=payload.full_name
+        )
+        return updated_user
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/settings", response_model=UserPublic)
+async def get_settings(
+    user_id: str = Depends(get_current_user_id),
+    user_service: UserService = Depends(get_user_service)
+) -> UserPublic:
+    """
+    Lấy cài đặt hiện tại của user
+    """
+    try:
+        return await user_service.get_user_by_id(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/seed-test-user", response_model=UserPublic, status_code=status.HTTP_201_CREATED)

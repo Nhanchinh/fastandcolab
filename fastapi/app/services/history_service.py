@@ -37,6 +37,23 @@ class HistoryService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.collection = db[self.COLLECTION_NAME]
+        self.users_collection = db["users"]  # Reference to users collection for consent filtering
+    
+    async def get_consented_user_ids(self) -> List[str]:
+        """
+        Lấy danh sách user_ids của những user cho phép chia sẻ dữ liệu.
+        Dùng cho admin khi query history.
+        """
+        user_ids = []
+        # Lấy users có consent_share_data = true hoặc không có field (mặc định là true)
+        async for user in self.users_collection.find({
+            "$or": [
+                {"consent_share_data": True},
+                {"consent_share_data": {"$exists": False}}  # Legacy users mặc định là true
+            ]
+        }, {"_id": 1}):
+            user_ids.append(str(user["_id"]))
+        return user_ids
     
     async def save_history(self, data: HistoryCreate, user_id: Optional[str] = None) -> HistoryResponse:
         """Lưu lịch sử tóm tắt mới"""
@@ -72,15 +89,25 @@ class HistoryService:
         has_feedback: Optional[bool] = None,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        consented_user_ids: Optional[List[str]] = None  # Danh sách user_ids cho phép admin xem
     ) -> HistoryListResponse:
-        """Lấy danh sách history với filter và pagination"""
+        """
+        Lấy danh sách history với filter và pagination.
+        - Nếu user_id được truyền: chỉ lấy của user đó
+        - Nếu consented_user_ids được truyền (admin mode): chỉ lấy của các user đồng ý chia sẻ
+        """
         
         # Build filter query
         query: Dict = {}
         
         if user_id:
+            # User mode: chỉ xem của mình
             query["user_id"] = user_id
+        elif consented_user_ids is not None:
+            # Admin mode: chỉ xem của users đồng ý chia sẻ
+            query["user_id"] = {"$in": consented_user_ids}
+        
         if model:
             query["model_used"] = model
         if rating:
@@ -128,6 +155,19 @@ class HistoryService:
         except Exception:
             return None
     
+    async def get_history_owner(self, history_id: str) -> Optional[str]:
+        """Lấy user_id của history entry (để kiểm tra quyền sở hữu)"""
+        try:
+            doc = await self.collection.find_one(
+                {"_id": ObjectId(history_id)},
+                {"user_id": 1}
+            )
+            if doc:
+                return doc.get("user_id")
+            return None
+        except Exception:
+            return None
+    
     async def add_feedback(self, history_id: str, feedback: FeedbackCreate) -> Optional[HistoryResponse]:
         """Thêm hoặc cập nhật feedback cho history entry"""
         try:
@@ -164,13 +204,16 @@ class HistoryService:
     async def export_bad_summaries(
         self,
         model: Optional[ModelType] = None,
-        limit: int = 100
+        limit: int = 100,
+        consented_user_ids: Optional[List[str]] = None
     ) -> ExportDatasetResponse:
         """Export các bản tóm tắt được đánh giá 'bad' để làm dataset training"""
         
         query: Dict = {"feedback.rating": "bad"}
         if model:
             query["model_used"] = model
+        if consented_user_ids is not None:
+            query["user_id"] = {"$in": consented_user_ids}
         
         cursor = self.collection.find(query).sort("feedback.feedback_at", -1).limit(limit)
         docs = await cursor.to_list(length=limit)
@@ -196,13 +239,16 @@ class HistoryService:
     async def export_human_eval(
         self,
         model: Optional[ModelType] = None,
-        limit: int = 500
+        limit: int = 500,
+        consented_user_ids: Optional[List[str]] = None
     ) -> HumanEvalExportResponse:
         """Export các bản tóm tắt có human evaluation scores"""
         
         query: Dict = {"feedback.human_eval": {"$exists": True}}
         if model:
             query["model_used"] = model
+        if consented_user_ids is not None:
+            query["user_id"] = {"$in": consented_user_ids}
         
         cursor = self.collection.find(query).sort("feedback.feedback_at", -1).limit(limit)
         docs = await cursor.to_list(length=limit)
@@ -329,20 +375,37 @@ class HistoryService:
         result = await self.collection.delete_many({})
         return result.deleted_count
 
-    async def get_analytics(self) -> AnalyticsResponse:
-        """Lấy analytics tổng quan cho dashboard"""
+    async def get_analytics(self, user_id: Optional[str] = None, consented_user_ids: Optional[List[str]] = None) -> AnalyticsResponse:
+        """
+        Lấy analytics tổng quan cho dashboard.
+        - Nếu user_id được truyền vào: chỉ tính stats cho user đó
+        - Nếu consented_user_ids được truyền (admin mode): chỉ tính từ các user đồng ý chia sẻ
+        """
         from datetime import timedelta
         
+        # Base query for filtering
+        if user_id:
+            # User mode: chỉ xem của mình
+            base_query = {"user_id": user_id}
+        elif consented_user_ids is not None:
+            # Admin mode: chỉ xem của users đồng ý chia sẻ
+            base_query = {"user_id": {"$in": consented_user_ids}}
+        else:
+            # Fallback: không filter
+            base_query = {}
+        
         # Total summaries
-        total_summaries = await self.collection.count_documents({})
+        total_summaries = await self.collection.count_documents(base_query)
         
         # Total with feedback
-        total_with_feedback = await self.collection.count_documents({"feedback": {"$ne": None}})
+        feedback_query = {**base_query, "feedback": {"$ne": None}}
+        total_with_feedback = await self.collection.count_documents(feedback_query)
         feedback_rate = (total_with_feedback / total_summaries * 100) if total_summaries > 0 else 0
         
         # Rating distribution
+        rating_match = {**base_query, "feedback": {"$ne": None}}
         rating_pipeline = [
-            {"$match": {"feedback": {"$ne": None}}},
+            {"$match": rating_match},
             {"$group": {"_id": "$feedback.rating", "count": {"$sum": 1}}}
         ]
         rating_cursor = self.collection.aggregate(rating_pipeline)
@@ -354,21 +417,40 @@ class HistoryService:
         
         # Model distribution
         model_pipeline = [
+            {"$match": base_query} if base_query else {"$match": {}},
             {"$group": {"_id": "$model_used", "count": {"$sum": 1}}}
         ]
+        if not base_query:
+            model_pipeline = [{"$group": {"_id": "$model_used", "count": {"$sum": 1}}}]
+        else:
+            model_pipeline = [
+                {"$match": base_query},
+                {"$group": {"_id": "$model_used", "count": {"$sum": 1}}}
+            ]
         model_cursor = self.collection.aggregate(model_pipeline)
         model_results = await model_cursor.to_list(length=10)
         model_distribution = {m["_id"]: m["count"] for m in model_results if m["_id"]}
         
         # Model stats with ratings
-        model_stats_pipeline = [
-            {"$group": {
-                "_id": "$model_used",
-                "count": {"$sum": 1},
-                "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
-                "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
-            }}
-        ]
+        if base_query:
+            model_stats_pipeline = [
+                {"$match": base_query},
+                {"$group": {
+                    "_id": "$model_used",
+                    "count": {"$sum": 1},
+                    "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
+                    "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
+                }}
+            ]
+        else:
+            model_stats_pipeline = [
+                {"$group": {
+                    "_id": "$model_used",
+                    "count": {"$sum": 1},
+                    "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
+                    "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
+                }}
+            ]
         model_stats_cursor = self.collection.aggregate(model_stats_pipeline)
         model_stats_results = await model_stats_cursor.to_list(length=10)
         
@@ -376,17 +458,18 @@ class HistoryService:
         for ms in model_stats_results:
             if not ms["_id"]:
                 continue
-            # Count ratings for this model
+            # Count ratings for this model (with user filter)
+            rating_base = {**base_query, "model_used": ms["_id"]} if base_query else {"model_used": ms["_id"]}
             good_count = await self.collection.count_documents({
-                "model_used": ms["_id"], 
+                **rating_base,
                 "feedback.rating": "good"
             })
             bad_count = await self.collection.count_documents({
-                "model_used": ms["_id"], 
+                **rating_base,
                 "feedback.rating": "bad"
             })
             neutral_count = await self.collection.count_documents({
-                "model_used": ms["_id"], 
+                **rating_base,
                 "feedback.rating": "neutral"
             })
             
@@ -402,8 +485,9 @@ class HistoryService:
         
         # Daily counts (last 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        daily_match = {**base_query, "created_at": {"$gte": thirty_days_ago}} if base_query else {"created_at": {"$gte": thirty_days_ago}}
         daily_pipeline = [
-            {"$match": {"created_at": {"$gte": thirty_days_ago}}},
+            {"$match": daily_match},
             {"$group": {
                 "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
                 "count": {"$sum": 1}
@@ -415,13 +499,23 @@ class HistoryService:
         daily_counts = [DailyCount(date=d["_id"], count=d["count"]) for d in daily_results]
         
         # Overall averages
-        avg_pipeline = [
-            {"$group": {
-                "_id": None,
-                "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
-                "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
-            }}
-        ]
+        if base_query:
+            avg_pipeline = [
+                {"$match": base_query},
+                {"$group": {
+                    "_id": None,
+                    "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
+                    "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
+                }}
+            ]
+        else:
+            avg_pipeline = [
+                {"$group": {
+                    "_id": None,
+                    "avg_compression_ratio": {"$avg": "$metrics.compression_ratio"},
+                    "avg_processing_time_ms": {"$avg": "$metrics.processing_time_ms"}
+                }}
+            ]
         avg_cursor = self.collection.aggregate(avg_pipeline)
         avg_results = await avg_cursor.to_list(length=1)
         
