@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 # Types
 RatingType = Literal["good", "bad", "neutral"]
-ModelType = Literal["vit5", "phobert_vit5", "phobert_vit5_paraphrase", "qwen"]
+ModelType = Literal["vit5", "phobert_vit5", "phobert_vit5_paraphrase", "vit5_fin", "qwen"]
 
 
 # ============= Request Schemas =============
