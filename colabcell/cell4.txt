@@ -17,13 +17,15 @@ if device == "cuda":
 
 # Load ViT5 Model (Finetuned + Logic Fixed)
 print("\n📦 Loading ViT5 (logic-fixed)...")
-vit5_tokenizer = AutoTokenizer.from_pretrained("tncinh/vit5-logic-fixed")
+# Tokenizer lấy từ model gốc VietAI (repo finetune không có spiece.model)
+vit5_tokenizer = AutoTokenizer.from_pretrained("VietAI/vit5-base", use_fast=False)
 vit5_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/vit5-logic-fixed").to(device)
 print("   ✅ ViT5 loaded!")
 
 # Load ViT5 Paraphrase Model
 print("\n📦 Loading ViT5 Paraphrase...")
-paraphrase_tokenizer = AutoTokenizer.from_pretrained("tncinh/my-vit5-paraphrase")
+# Tokenizer lấy từ model gốc VietAI (repo finetune không có spiece.model)
+paraphrase_tokenizer = AutoTokenizer.from_pretrained("VietAI/vit5-base", use_fast=False)
 paraphrase_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/my-vit5-paraphrase").to(device)
 print("   ✅ ViT5 Paraphrase loaded!")
 
@@ -32,6 +34,12 @@ print("\n📦 Loading PhoBERT...")
 phobert_tokenizer = AutoTokenizer.from_pretrained("vinai/phobert-base")
 phobert_model = AutoModel.from_pretrained("vinai/phobert-base").to(device)
 print("   ✅ PhoBERT loaded!")
+
+# Load ViT5 Financial v2 (Financial Summarization)
+print("\n📦 Loading ViT5 Financial v2 (tncinh/vit5-financial-summarization-v2)...")
+vit5_fin_tokenizer = AutoTokenizer.from_pretrained("VietAI/vit5-base", use_fast=False)
+vit5_fin_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/vit5-financial-summarization-v2").to(device)
+print("   ✅ ViT5 Financial v2 loaded!")
 
 # Load Qwen 7B với 4-bit quantization để tiết kiệm VRAM
 print("\n📦 Loading Qwen2.5-7B (4-bit quantized)...")
@@ -59,3 +67,4 @@ if device == "cuda":
     print(f"   VRAM còn trống: {(torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated()) / 1024**3:.2f} GB")
 
 print("\n🎉 TẤT CẢ MODELS ĐÃ SẴN SÀNG!")
+print("   Models: vit5, vit5_paraphrase, phobert, vit5_fin, qwen")

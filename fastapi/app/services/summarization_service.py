@@ -178,9 +178,14 @@ class SummarizationService:
                 "description": "ViT5 thuần túy - sinh tóm tắt trực tiếp từ văn bản"
             },
             {
+                "id": ModelType.VIT5_FIN.value,
+                "name": "ViT5 Financial v2",
+                "description": "ViT5 fine-tuned cho tóm tắt tài chính - chuyên xử lý văn bản tài chính, kinh tế"
+            },
+            {
                 "id": ModelType.QWEN.value,
-                "name": "Qwen2.5-3B",
-                "description": "Mô hình ngôn ngữ lớn Qwen 3B - hỗ trợ văn bản dài"
+                "name": "Qwen2.5-7B",
+                "description": "Mô hình ngôn ngữ lớn Qwen 7B - hỗ trợ văn bản dài"
             }
         ]
 

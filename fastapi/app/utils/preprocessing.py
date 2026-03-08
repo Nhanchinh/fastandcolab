@@ -159,6 +159,27 @@ class QwenPreprocessor(BasePreprocessor):
         }
 
 
+class ViT5FinPreprocessor(BasePreprocessor):
+    """Preprocessor cho model ViT5 Financial v2 (tncinh/vit5-financial-summarization-v2)"""
+    
+    def preprocess(self, text: str, max_length: int = 1024, **kwargs) -> dict:
+        # Clean text
+        cleaned = clean_text(text)
+        
+        # Truncate nếu quá dài (ViT5 context ~ 1024 tokens)
+        truncated = truncate_text(cleaned, max_chars=3000)
+        
+        # Thêm prefix cho ViT5
+        processed = f"summarize: {truncated}"
+        
+        return {
+            "processed_text": processed,
+            "original_length": len(text),
+            "processed_length": len(truncated),
+            "was_truncated": len(truncated) < len(cleaned)
+        }
+
+
 # Factory function
 def get_preprocessor(model_type: str) -> BasePreprocessor:
     """Lấy preprocessor phù hợp với loại model"""
@@ -166,6 +187,7 @@ def get_preprocessor(model_type: str) -> BasePreprocessor:
         "vit5": ViT5Preprocessor(),
         "phobert_vit5": PhoBertViT5Preprocessor(),
         "phobert_vit5_paraphrase": PhoBertViT5Preprocessor(),  # Dùng chung preprocessor với phobert_vit5
+        "vit5_fin": ViT5FinPreprocessor(),
         "qwen": QwenPreprocessor(),
     }
     

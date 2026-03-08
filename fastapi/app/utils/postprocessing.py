@@ -241,6 +241,26 @@ class QwenPostprocessor(BasePostprocessor):
         }
 
 
+class ViT5FinPostprocessor(BasePostprocessor):
+    """Postprocessor cho model ViT5 Financial v2"""
+    
+    def postprocess(self, summary: str, **kwargs) -> dict:
+        # Clean basic
+        cleaned = clean_output(summary)
+        
+        # Remove repetition (ViT5 đôi khi lặp cụm từ)
+        cleaned = remove_repetition(cleaned)
+        
+        # Ensure complete sentences
+        cleaned = ensure_complete_sentences(cleaned)
+        
+        return {
+            "summary": cleaned,
+            "original_length": len(summary),
+            "processed_length": len(cleaned)
+        }
+
+
 # Factory function
 def get_postprocessor(model_type: str) -> BasePostprocessor:
     """Lấy postprocessor phù hợp với loại model"""
@@ -248,6 +268,7 @@ def get_postprocessor(model_type: str) -> BasePostprocessor:
         "vit5": ViT5Postprocessor(),
         "phobert_vit5": PhoBertViT5Postprocessor(),
         "phobert_vit5_paraphrase": PhoBertViT5Postprocessor(),  # Dùng chung postprocessor với phobert_vit5
+        "vit5_fin": ViT5FinPostprocessor(),
         "qwen": QwenPostprocessor(),
     }
     

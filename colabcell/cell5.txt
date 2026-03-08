@@ -142,6 +142,36 @@ def generate_phobert_vit5_paraphrase(sentences: List[str], max_length: int = 256
     return final_text
 
 
+def generate_vit5_fin(text: str, max_length: int = 256) -> str:
+    """Sinh tóm tắt bằng ViT5 Financial v2 (tncinh/vit5-financial-summarization-v2)"""
+    # Thêm prefix nếu chưa có
+    if not text.startswith("summarize:"):
+        text = f"summarize: {text}"
+
+    inputs = vit5_fin_tokenizer(
+        text,
+        return_tensors="pt",
+        max_length=1024,
+        truncation=True
+    ).to(device)
+
+    with torch.no_grad():
+        outputs = vit5_fin_model.generate(
+            **inputs,
+            max_length=max_length,
+            min_length=50,
+            num_beams=6,
+            length_penalty=1.2,
+            early_stopping=True,
+            no_repeat_ngram_size=3,
+            repetition_penalty=1.5,
+            do_sample=False
+        )
+
+    summary = vit5_fin_tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return summary.strip()
+
+
 def generate_qwen(text: str, max_length: int = 256) -> str:
     """Sinh tóm tắt bằng Qwen2.5-3B"""
     messages = [
@@ -185,5 +215,6 @@ def generate_qwen(text: str, max_length: int = 256) -> str:
 print("✅ Các hàm generate đã sẵn sàng!")
 print("   - generate_vit5")
 print("   - generate_phobert_vit5")
-print("   - generate_phobert_vit5_paraphrase ⭐ NEW")
+print("   - generate_phobert_vit5_paraphrase")
+print("   - generate_vit5_fin ⭐ UPDATED")
 print("   - generate_qwen")

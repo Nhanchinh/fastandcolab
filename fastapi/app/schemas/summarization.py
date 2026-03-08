@@ -8,6 +8,7 @@ class ModelType(str, Enum):
     PHOBERT_VIT5 = "phobert_vit5"  # Hybrid: PhoBERT ranking + ViT5 generation
     PHOBERT_VIT5_PARAPHRASE = "phobert_vit5_paraphrase"  # Hybrid: PhoBERT + ViT5 Paraphrase
     VIT5 = "vit5"                   # Pure ViT5
+    VIT5_FIN = "vit5_fin"             # ViT5 Financial Summarization v2
     QWEN = "qwen"                   # Qwen2.5-7B
 
 
@@ -50,8 +51,8 @@ class CompareRequest(BaseModel):
     """Request body cho API so sánh models"""
     text: str = Field(..., min_length=10, description="Văn bản tiếng Việt cần tóm tắt")
     models: List[ModelType] = Field(
-        default=[ModelType.VIT5, ModelType.PHOBERT_VIT5, ModelType.QWEN],
-        description="Danh sách models cần so sánh (mặc định: vit5, phobert_vit5, qwen)"
+        default=[ModelType.VIT5, ModelType.PHOBERT_VIT5, ModelType.VIT5_FIN, ModelType.QWEN],
+        description="Danh sách models cần so sánh (mặc định: vit5, phobert_vit5, vit5_fin, qwen)"
     )
     max_length: Optional[int] = Field(default=256, ge=50, le=512, description="Độ dài tối đa")
 
