@@ -11,4 +11,7 @@
 # Vietnamese NLP
 !pip install -q underthesea
 
+# Evaluation metrics (chạy trên GPU cho nhanh)
+!pip install -q evaluate bert_score rouge_score pyvi
+
 print("✅ Đã cài đặt thư viện!")

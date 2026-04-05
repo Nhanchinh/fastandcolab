@@ -37,10 +37,22 @@ class AIJudgeRanking(BaseModel):
     score: int
     reasoning: str
 
+class ModelAnalysis(BaseModel):
+    model: str
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    missing_points: List[str] = []
+    incorrect_points: List[str] = []
+    fluency_score: int = 0
+    coherence_score: int = 0
+    relevance_score: int = 0
+    consistency_score: int = 0
+
 class AIJudgeResponse(BaseModel):
     winner: str
     rankings: List[AIJudgeRanking]
     detailed_analysis: str
+    model_analyses: List[ModelAnalysis] = []
     processing_time_ms: int
 
 
@@ -161,6 +173,38 @@ async def list_ai_models(
     """
     models = service.list_available_models()
     return {"models": models}
+
+
+class GenerateReferenceRequest(BaseModel):
+    text: str
+
+class GenerateReferenceResponse(BaseModel):
+    reference_summary: str
+    processing_time_ms: int
+
+
+@router.post("/generate-reference", response_model=GenerateReferenceResponse)
+async def generate_reference(
+    request: GenerateReferenceRequest,
+    service: AIJudgeService = Depends(get_ai_judge_service)
+):
+    """
+    Sử dụng AI (Gemini) để sinh bản tóm tắt gold (reference summary).
+    Dùng làm ground truth để đánh giá chất lượng model tóm tắt.
+    """
+    if not service.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gemini API chưa được cấu hình."
+        )
+    
+    try:
+        result = await service.generate_reference_summary(request.text)
+        return GenerateReferenceResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi: {str(e)}")
 
 @router.get("/health", response_model=ColabHealthResponse)
 async def check_health(

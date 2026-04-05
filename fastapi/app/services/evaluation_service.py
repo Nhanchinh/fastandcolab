@@ -1,14 +1,11 @@
 """
 Evaluation Service - ROUGE, BLEU, BERTScore cho tiếng Việt
-Tính toán metrics với word segmentation và performance optimizations
+Ưu tiên gọi Colab GPU, fallback local nếu Colab không available
 """
 
 import logging
 import time
 from typing import Dict, List, Optional
-
-import evaluate
-from pyvi import ViTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +14,10 @@ class EvaluationService:
     """
     Service tính toán evaluation metrics cho văn bản tiếng Việt.
     
-    **Performance Optimizations**:
-    - Lazy loading cho BERTScore (tiết kiệm RAM khi khởi động)
+    **Architecture**:
+    - Ưu tiên gọi Colab GPU server (BERTScore nhanh 10-50x)
+    - Fallback tính local nếu Colab không available
     - Cache metrics instances (ROUGE, BLEU load một lần)
-    - Batch processing cho BERTScore (tăng tốc 3-5x)
-    - Word segmentation được optimize để tránh tokenize lặp lại
     
     **Vietnamese-Specific**:
     - ROUGE/BLEU: Cần word segmentation với pyvi
@@ -30,188 +26,149 @@ class EvaluationService:
     
     def __init__(self):
         """
-        Khởi tạo service với lazy loading.
-        Chỉ load BERTScore khi thực sự cần dùng để tiết kiệm RAM.
+        Khởi tạo service.
+        Local metrics chỉ load khi cần (fallback).
         """
-        self.rouge = None
-        self.bleu = None
-        self.bert_metric = None
+        # Local metrics (lazy loaded, chỉ dùng khi Colab unavailable)
+        self._rouge = None
+        self._bleu = None
+        self._bert_metric = None
         self._bert_loaded = False
         
-        logger.info("EvaluationService initialized (lazy loading enabled)")
+        # Colab client
+        self._colab_client = None
+        
+        logger.info("EvaluationService initialized (Colab GPU mode)")
     
-    def _load_rouge_bleu(self):
-        """Load ROUGE và BLEU metrics (lightweight)"""
-        if self.rouge is None:
-            logger.info("Loading ROUGE metric...")
-            self.rouge = evaluate.load('rouge')
-        
-        if self.bleu is None:
-            logger.info("Loading BLEU metric...")
-            self.bleu = evaluate.load('bleu')
+    def _get_colab_client(self):
+        """Lazy init colab client"""
+        if self._colab_client is None:
+            from app.services.colab_client import get_colab_client
+            self._colab_client = get_colab_client()
+        return self._colab_client
     
-    def _load_bertscore(self):
-        """
-        Lazy load BERTScore metric.
-        
-        WARNING: BERTScore tải model BERT (~700MB) vào RAM/VRAM.
-        Chỉ gọi khi thực sự cần thiết.
-        """
-        if not self._bert_loaded:
-            logger.info("Loading BERTScore metric (this may take a while)...")
-            self.bert_metric = evaluate.load("bertscore")
-            self._bert_loaded = True
-            logger.info("BERTScore loaded successfully")
+    # ============ Colab GPU Methods (Primary) ============
     
-    def preprocess_vietnamese(self, texts: List[str]) -> List[str]:
-        """
-        Tách từ tiếng Việt cho ROUGE/BLEU.
-        
-        Biến "sinh viên" → "sinh_viên" để metrics tính toán chính xác.
-        
-        Args:
-            texts: Danh sách văn bản gốc
-            
-        Returns:
-            Danh sách văn bản đã tách từ
-        """
-        return [ViTokenizer.tokenize(text) for text in texts]
-    
-    def calculate_rouge(
-        self, 
-        predictions: List[str], 
-        references: List[str]
-    ) -> Dict[str, float]:
-        """
-        Tính ROUGE scores cho tiếng Việt.
-        
-        Args:
-            predictions: Danh sách văn bản tóm tắt (generated)
-            references: Danh sách văn bản tham khảo (reference)
-            
-        Returns:
-            Dict chứa rouge1, rouge2, rougeL (F1 scores)
-        """
-        # Handle empty inputs
-        if not predictions or not references:
-            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
-        
-        # Check for empty strings - return 0 scores
-        if all(not p.strip() for p in predictions) or all(not r.strip() for r in references):
-            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
-        
-        self._load_rouge_bleu()
-        
-        # CRITICAL: Tách từ tiếng Việt trước khi tính ROUGE
-        preds_tokenized = self.preprocess_vietnamese(predictions)
-        refs_tokenized = self.preprocess_vietnamese(references)
-        
-        try:
-            results = self.rouge.compute(
-                predictions=preds_tokenized,
-                references=refs_tokenized,
-                use_stemmer=False  # Không dùng stemmer cho tiếng Việt
-            )
-            
-            # Extract F1 scores
-            return {
-                'rouge1': results['rouge1'],
-                'rouge2': results['rouge2'],
-                'rougeL': results['rougeL']
-            }
-        except Exception as e:
-            logger.warning(f"ROUGE calculation failed: {e}")
-            return {'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0}
-    
-    def calculate_bleu(
-        self,
-        predictions: List[str],
-        references: List[str]
-    ) -> float:
-        """
-        Tính BLEU score cho tiếng Việt.
-        
-        Args:
-            predictions: Danh sách văn bản tóm tắt
-            references: Danh sách văn bản tham khảo
-            
-        Returns:
-            BLEU score (0-1)
-        """
-        # Handle empty inputs - CRITICAL: prevents ZeroDivisionError
-        if not predictions or not references:
-            return 0.0
-        
-        # Check for empty strings - return 0 score
-        if all(not p.strip() for p in predictions) or all(not r.strip() for r in references):
-            return 0.0
-        
-        self._load_rouge_bleu()
-        
-        # CRITICAL: Tách từ tiếng Việt trước khi tính BLEU
-        preds_tokenized = self.preprocess_vietnamese(predictions)
-        refs_tokenized = self.preprocess_vietnamese(references)
-        
-        # Filter out empty tokenized strings to prevent ZeroDivisionError
-        valid_pairs = [(p, r) for p, r in zip(preds_tokenized, refs_tokenized) 
-                       if p.strip() and r.strip()]
-        
-        if not valid_pairs:
-            return 0.0
-        
-        valid_preds, valid_refs = zip(*valid_pairs)
-        
-        # BLEU expects references to be list of lists
-        refs_formatted = [[ref] for ref in valid_refs]
-        
-        try:
-            results = self.bleu.compute(
-                predictions=list(valid_preds),
-                references=refs_formatted
-            )
-            return results['bleu']
-        except ZeroDivisionError:
-            logger.warning("BLEU calculation got ZeroDivisionError - returning 0.0")
-            return 0.0
-        except Exception as e:
-            logger.warning(f"BLEU calculation failed: {e}")
-            return 0.0
-    
-    def calculate_bertscore(
+    async def _evaluate_via_colab(
         self,
         predictions: List[str],
         references: List[str],
-        batch_size: int = 16
-    ) -> float:
+        calculate_bert: bool = True,
+        batch_size: int = 32
+    ) -> Optional[Dict[str, float]]:
         """
-        Tính BERTScore cho tiếng Việt.
+        Gọi Colab GPU để tính evaluation metrics.
         
-        **Performance Note**: BERTScore rất nặng! Trên CPU có thể mất 1-2s/văn bản.
-        Sử dụng batch_size để tăng tốc độ xử lý.
-        
-        Args:
-            predictions: Danh sách văn bản tóm tắt (RAW text, không cần tokenize)
-            references: Danh sách văn bản tham khảo (RAW text)
-            batch_size: Batch size cho inference (default 16)
-            
         Returns:
-            Average BERTScore F1 (0-1)
+            Dict metrics nếu thành công, None nếu Colab unavailable
         """
-        self._load_bertscore()
+        try:
+            colab = self._get_colab_client()
+            result = await colab.evaluate(
+                predictions=predictions,
+                references=references,
+                calculate_bert=calculate_bert,
+                batch_size=batch_size
+            )
+            logger.info(f"Evaluation via Colab GPU: {result.get('processing_time_ms', 0):.0f}ms")
+            return result
+        except Exception as e:
+            logger.warning(f"Colab evaluation failed, falling back to local: {e}")
+            return None
+    
+    # ============ Local Fallback Methods ============
+    
+    def _load_rouge_bleu(self):
+        """Load ROUGE và BLEU metrics locally (lightweight)"""
+        if self._rouge is None:
+            import evaluate
+            logger.info("Loading ROUGE metric locally...")
+            self._rouge = evaluate.load('rouge')
         
-        # BERTScore KHÔNG cần word segmentation thủ công
-        # Model BERT tự xử lý tokenization
-        results = self.bert_metric.compute(
-            predictions=predictions,
-            references=references,
-            lang="vi",  # Tự động chọn multilingual BERT
-            batch_size=batch_size,
-            verbose=False
-        )
+        if self._bleu is None:
+            import evaluate
+            logger.info("Loading BLEU metric locally...")
+            self._bleu = evaluate.load('bleu')
+    
+    def _load_bertscore(self):
+        """Lazy load BERTScore metric locally (heavy, ~700MB)"""
+        if not self._bert_loaded:
+            import evaluate
+            logger.info("Loading BERTScore metric locally (this may take a while)...")
+            self._bert_metric = evaluate.load("bertscore")
+            self._bert_loaded = True
+            logger.info("BERTScore loaded successfully (local)")
+    
+    def _preprocess_vietnamese(self, texts: List[str]) -> List[str]:
+        """Tách từ tiếng Việt cho ROUGE/BLEU"""
+        from pyvi import ViTokenizer
+        return [ViTokenizer.tokenize(text) for text in texts]
+    
+    def _calculate_local(
+        self,
+        predictions: List[str],
+        references: List[str],
+        calculate_bert: bool = True,
+        batch_size: int = 16
+    ) -> Dict[str, float]:
+        """Tính metrics cục bộ (fallback khi Colab unavailable)"""
+        self._load_rouge_bleu()
         
-        # Tính trung bình F1 scores
-        avg_f1 = sum(results['f1']) / len(results['f1'])
-        return avg_f1
+        # ROUGE
+        preds_tok = self._preprocess_vietnamese(predictions)
+        refs_tok = self._preprocess_vietnamese(references)
+        
+        try:
+            rouge_results = self._rouge.compute(
+                predictions=preds_tok,
+                references=refs_tok,
+                use_stemmer=False
+            )
+            rouge1 = rouge_results['rouge1']
+            rouge2 = rouge_results['rouge2']
+            rougeL = rouge_results['rougeL']
+        except Exception as e:
+            logger.warning(f"Local ROUGE failed: {e}")
+            rouge1 = rouge2 = rougeL = 0.0
+        
+        # BLEU
+        try:
+            refs_formatted = [[ref] for ref in refs_tok]
+            bleu_results = self._bleu.compute(
+                predictions=preds_tok,
+                references=refs_formatted
+            )
+            bleu = bleu_results['bleu']
+        except (ZeroDivisionError, Exception) as e:
+            logger.warning(f"Local BLEU failed: {e}")
+            bleu = 0.0
+        
+        # BERTScore (chậm trên CPU)
+        bert_score = 0.0
+        if calculate_bert:
+            try:
+                self._load_bertscore()
+                results = self._bert_metric.compute(
+                    predictions=predictions,
+                    references=references,
+                    lang="vi",
+                    batch_size=batch_size,
+                    verbose=False
+                )
+                bert_score = sum(results['f1']) / len(results['f1'])
+            except Exception as e:
+                logger.warning(f"Local BERTScore failed: {e}")
+                bert_score = 0.0
+        
+        return {
+            'rouge1': rouge1,
+            'rouge2': rouge2,
+            'rougeL': rougeL,
+            'bleu': bleu,
+            'bert_score': bert_score
+        }
+    
+    # ============ Public API ============
     
     async def evaluate_single(
         self,
@@ -222,57 +179,45 @@ class EvaluationService:
     ) -> Dict[str, float]:
         """
         Đánh giá một cặp prediction-reference.
-        
-        Args:
-            prediction: Văn bản tóm tắt (generated)
-            reference: Văn bản tham khảo
-            calculate_bert: Có tính BERTScore không (mặc định True, nhưng chậm)
-            batch_size: Batch size cho BERTScore
-            
-        Returns:
-            Dict chứa tất cả metrics + processing_time_ms
+        Ưu tiên Colab GPU, fallback local.
         """
         start_time = time.time()
         
-        # Handle empty inputs - return zeros
+        # Handle empty inputs
         if not prediction or not reference or not prediction.strip() or not reference.strip():
-            logger.warning(f"Empty prediction or reference detected. Pred len: {len(prediction or '')}, Ref len: {len(reference or '')}")
+            logger.warning(f"Empty prediction or reference detected.")
             return {
-                'rouge1': 0.0,
-                'rouge2': 0.0,
-                'rougeL': 0.0,
-                'bleu': 0.0,
-                'bert_score': 0.0,
-                'processing_time_ms': int((time.time() - start_time) * 1000)
+                'rouge1': 0.0, 'rouge2': 0.0, 'rougeL': 0.0,
+                'bleu': 0.0, 'bert_score': 0.0,
+                'processing_time_ms': 0
             }
         
-        # Wrap strings in lists for batch processing
         preds = [prediction]
         refs = [reference]
         
-        # Tính ROUGE & BLEU
-        rouge_scores = self.calculate_rouge(preds, refs)
-        bleu_score = self.calculate_bleu(preds, refs)
+        # Thử Colab GPU trước
+        colab_result = await self._evaluate_via_colab(
+            preds, refs, calculate_bert, batch_size=32
+        )
         
-        # Tính BERTScore (optional vì rất chậm)
-        bert_score = 0.0
-        if calculate_bert:
-            try:
-                bert_score = self.calculate_bertscore(preds, refs, batch_size=batch_size)
-            except Exception as e:
-                logger.warning(f"BERTScore calculation failed: {e}")
-                bert_score = 0.0
+        if colab_result is not None:
+            processing_time = int((time.time() - start_time) * 1000)
+            return {
+                'rouge1': colab_result.get('rouge1', 0.0),
+                'rouge2': colab_result.get('rouge2', 0.0),
+                'rougeL': colab_result.get('rougeL', 0.0),
+                'bleu': colab_result.get('bleu', 0.0),
+                'bert_score': colab_result.get('bert_score', 0.0),
+                'processing_time_ms': processing_time
+            }
         
+        # Fallback local
+        logger.info("Using local evaluation (Colab unavailable)")
+        result = self._calculate_local(preds, refs, calculate_bert, batch_size)
         processing_time = int((time.time() - start_time) * 1000)
+        result['processing_time_ms'] = processing_time
         
-        return {
-            'rouge1': rouge_scores['rouge1'],
-            'rouge2': rouge_scores['rouge2'],
-            'rougeL': rouge_scores['rougeL'],
-            'bleu': bleu_score,
-            'bert_score': bert_score,
-            'processing_time_ms': processing_time
-        }
+        return result
     
     async def evaluate_batch(
         self,
@@ -284,58 +229,54 @@ class EvaluationService:
     ) -> Dict[str, float]:
         """
         Đánh giá batch predictions.
-        
-        **Performance**: Xử lý theo batch để tăng tốc BERTScore.
-        
-        Args:
-            predictions: List các văn bản tóm tắt
-            references: List các văn bản tham khảo
-            calculate_bert: Có tính BERTScore không
-            batch_size: Batch size cho BERTScore (16-32 recommended)
-            progress_callback: Callback function để update progress
-            
-        Returns:
-            Dict chứa average metrics
+        Ưu tiên Colab GPU, fallback local.
         """
         start_time = time.time()
         total_samples = len(predictions)
         
         logger.info(f"Starting batch evaluation for {total_samples} samples")
         
-        # Tính ROUGE & BLEU cho toàn bộ batch
-        rouge_scores = self.calculate_rouge(predictions, references)
-        bleu_score = self.calculate_bleu(predictions, references)
+        # Thử Colab GPU trước
+        colab_result = await self._evaluate_via_colab(
+            predictions, references, calculate_bert, batch_size=32
+        )
         
-        # Update progress
+        if colab_result is not None:
+            if progress_callback:
+                await progress_callback(100)
+            
+            processing_time = int((time.time() - start_time) * 1000)
+            
+            return {
+                'avg_rouge1': colab_result.get('rouge1', 0.0),
+                'avg_rouge2': colab_result.get('rouge2', 0.0),
+                'avg_rougeL': colab_result.get('rougeL', 0.0),
+                'avg_bleu': colab_result.get('bleu', 0.0),
+                'avg_bert_score': colab_result.get('bert_score', 0.0),
+                'avg_processing_time_ms': processing_time // total_samples,
+                'total_samples': total_samples
+            }
+        
+        # Fallback local
+        logger.info("Using local batch evaluation (Colab unavailable)")
+        
         if progress_callback:
-            await progress_callback(50)  # 50% done after ROUGE/BLEU
+            await progress_callback(10)
         
-        # Tính BERTScore (chậm nhất)
-        bert_score = 0.0
-        if calculate_bert:
-            logger.info(f"Calculating BERTScore with batch_size={batch_size}...")
-            bert_score = self.calculate_bertscore(
-                predictions, 
-                references, 
-                batch_size=batch_size
-            )
+        result = self._calculate_local(predictions, references, calculate_bert, batch_size)
         
-        # Update progress
         if progress_callback:
             await progress_callback(100)
         
         processing_time = int((time.time() - start_time) * 1000)
-        avg_processing_time = processing_time // total_samples
-        
-        logger.info(f"Batch evaluation completed in {processing_time}ms")
         
         return {
-            'avg_rouge1': rouge_scores['rouge1'],
-            'avg_rouge2': rouge_scores['rouge2'],
-            'avg_rougeL': rouge_scores['rougeL'],
-            'avg_bleu': bleu_score,
-            'avg_bert_score': bert_score,
-            'avg_processing_time_ms': avg_processing_time,
+            'avg_rouge1': result['rouge1'],
+            'avg_rouge2': result['rouge2'],
+            'avg_rougeL': result['rougeL'],
+            'avg_bleu': result['bleu'],
+            'avg_bert_score': result['bert_score'],
+            'avg_processing_time_ms': processing_time // total_samples,
             'total_samples': total_samples
         }
 

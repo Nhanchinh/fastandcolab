@@ -130,6 +130,47 @@ class ColabClient:
             raise RuntimeError(f"Colab server lỗi: {e.response.text}")
         except Exception as e:
             raise ConnectionError(f"Không thể kết nối Colab server: {e}")
+    
+    async def evaluate(
+        self,
+        predictions: list,
+        references: list,
+        calculate_bert: bool = True,
+        batch_size: int = 32
+    ) -> Dict[str, Any]:
+        """
+        Gọi API đánh giá trên Colab server (GPU).
+        
+        BERTScore chạy trên GPU nhanh hơn CPU 10-50x.
+        
+        Args:
+            predictions: Danh sách văn bản tóm tắt
+            references: Danh sách văn bản tham khảo
+            calculate_bert: Có tính BERTScore không
+            batch_size: Batch size cho BERTScore
+            
+        Returns:
+            Dict chứa rouge1, rouge2, rougeL, bleu, bert_score, processing_time_ms
+        """
+        url = await self.get_colab_url()
+        
+        payload = {
+            "predictions": predictions,
+            "references": references,
+            "calculate_bert": calculate_bert,
+            "batch_size": batch_size
+        }
+        
+        try:
+            resp = await self.client.post(f"{url}/evaluate", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.TimeoutException:
+            raise TimeoutError(f"Colab evaluate timeout sau {self.timeout}s")
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Colab evaluate lỗi: {e.response.text}")
+        except Exception as e:
+            raise ConnectionError(f"Không thể kết nối Colab server cho evaluate: {e}")
 
 
 # Singleton instance

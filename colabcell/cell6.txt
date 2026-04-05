@@ -6,7 +6,23 @@ import time
 
 app = FastAPI(title="Colab Summarization Server")
 
+# ============ Evaluation Setup ============
+import evaluate
+from pyvi import ViTokenizer
 
+# Load metrics (lightweight, load một lần)
+rouge_metric = evaluate.load('rouge')
+bleu_metric = evaluate.load('bleu')
+bert_metric = evaluate.load('bertscore')
+print("✅ Evaluation metrics loaded (ROUGE, BLEU, BERTScore)")
+
+
+def preprocess_vietnamese(texts):
+    """Tách từ tiếng Việt cho ROUGE/BLEU"""
+    return [ViTokenizer.tokenize(text) for text in texts]
+
+
+# ============ Request/Response Models ============
 class SummarizeRequest(BaseModel):
     text: str
     model: str  # "phobert_vit5", "vit5", "vit5_fin", "qwen", "phobert_vit5_paraphrase"
@@ -20,6 +36,23 @@ class SummarizeResponse(BaseModel):
     inference_time_ms: float
 
 
+class EvaluateRequest(BaseModel):
+    predictions: List[str]
+    references: List[str]
+    calculate_bert: bool = True
+    batch_size: int = 32
+
+
+class EvaluateResponse(BaseModel):
+    rouge1: float
+    rouge2: float
+    rougeL: float
+    bleu: float
+    bert_score: float
+    processing_time_ms: float
+
+
+# ============ Endpoints ============
 @app.get("/health")
 async def health():
     """Health check endpoint"""
@@ -27,7 +60,8 @@ async def health():
         "status": "ok",
         "gpu": torch.cuda.is_available(),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        "models_loaded": ["vit5", "vit5_paraphrase", "phobert", "vit5_fin", "qwen"]
+        "models_loaded": ["vit5", "vit5_paraphrase", "phobert", "vit5_fin", "qwen"],
+        "evaluation_ready": True
     }
 
 
@@ -86,8 +120,99 @@ async def summarize(req: SummarizeRequest):
         )
 
 
+@app.post("/evaluate", response_model=EvaluateResponse)
+async def evaluate_text(req: EvaluateRequest):
+    """
+    Endpoint đánh giá chất lượng tóm tắt trên GPU.
+
+    Tính ROUGE, BLEU, BERTScore cho tiếng Việt.
+    BERTScore chạy trên GPU nhanh hơn CPU 10-50x.
+    """
+    start_time = time.time()
+
+    try:
+        preds = req.predictions
+        refs = req.references
+
+        if len(preds) != len(refs):
+            raise HTTPException(
+                status_code=400,
+                detail=f"predictions ({len(preds)}) và references ({len(refs)}) phải cùng độ dài"
+            )
+
+        # Filter empty strings
+        valid_pairs = [(p, r) for p, r in zip(preds, refs) if p.strip() and r.strip()]
+        if not valid_pairs:
+            return EvaluateResponse(
+                rouge1=0.0, rouge2=0.0, rougeL=0.0,
+                bleu=0.0, bert_score=0.0,
+                processing_time_ms=0.0
+            )
+
+        valid_preds, valid_refs = zip(*valid_pairs)
+        valid_preds = list(valid_preds)
+        valid_refs = list(valid_refs)
+
+        # 1. ROUGE (với Vietnamese word segmentation)
+        preds_tok = preprocess_vietnamese(valid_preds)
+        refs_tok = preprocess_vietnamese(valid_refs)
+
+        rouge_results = rouge_metric.compute(
+            predictions=preds_tok,
+            references=refs_tok,
+            use_stemmer=False
+        )
+        rouge1 = rouge_results['rouge1']
+        rouge2 = rouge_results['rouge2']
+        rougeL = rouge_results['rougeL']
+
+        # 2. BLEU (với Vietnamese word segmentation)
+        try:
+            refs_formatted = [[ref] for ref in refs_tok]
+            bleu_results = bleu_metric.compute(
+                predictions=preds_tok,
+                references=refs_formatted
+            )
+            bleu = bleu_results['bleu']
+        except ZeroDivisionError:
+            bleu = 0.0
+
+        # 3. BERTScore (trên GPU - NHANH!)
+        bert_score_val = 0.0
+        if req.calculate_bert:
+            bert_results = bert_metric.compute(
+                predictions=valid_preds,
+                references=valid_refs,
+                lang="vi",
+                batch_size=req.batch_size,
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                verbose=False
+            )
+            bert_score_val = sum(bert_results['f1']) / len(bert_results['f1'])
+
+        processing_time = (time.time() - start_time) * 1000
+
+        return EvaluateResponse(
+            rouge1=rouge1,
+            rouge2=rouge2,
+            rougeL=rougeL,
+            bleu=bleu,
+            bert_score=bert_score_val,
+            processing_time_ms=processing_time
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi evaluation: {str(e)}"
+        )
+
+
 print("✅ FastAPI server đã sẵn sàng!")
 print(f"📡 Endpoints:")
 print(f"   GET  /health     - Health check")
 print(f"   POST /summarize  - Tóm tắt văn bản")
+print(f"   POST /evaluate   - Đánh giá chất lượng (GPU) ⭐ NEW")
 print(f"   Models: vit5, phobert_vit5, phobert_vit5_paraphrase, vit5_fin, qwen")
