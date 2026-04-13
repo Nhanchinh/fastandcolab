@@ -42,7 +42,7 @@ class BatchUploadResponse(BaseModel):
 
 class BatchUploadRequest(BaseModel):
     """Request params cho batch upload (form data)"""
-    model: ModelType = Field(default=ModelType.VIT5, description="Model sử dụng cho tất cả items")
+    model: ModelType = Field(default=ModelType.VIT5_FIN, description="Model sử dụng cho tất cả items")
     max_length: int = Field(default=256, ge=50, le=512)
     text_column: str = Field(default="text", description="Tên cột chứa văn bản cần tóm tắt")
     reference_column: Optional[str] = Field(default=None, description="Tên cột chứa tóm tắt tham chiếu (optional)")

@@ -11,7 +11,7 @@ from typing import Literal, Optional, TypedDict
 RatingType = Literal["good", "bad", "neutral"]
 
 # Model types (matching existing schema)
-ModelType = Literal["vit5", "phobert_vit5", "qwen"]
+ModelType = Literal["vit5_fin", "qwen", "phobert_finance", "vit5", "phobert_vit5", "phobert_vit5_paraphrase"]
 
 
 class SummaryMetrics(TypedDict, total=False):

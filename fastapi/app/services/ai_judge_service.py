@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 class AIJudgeRequest(BaseModel):
     original_text: str
-    summaries: List[Dict[str, str]]  # [{"model": "vit5", "summary": "..."}, ...]
+    summaries: List[Dict[str, str]]  # [{"model": "vit5_fin", "summary": "..."}, ...]
 
 
 class AIJudgeResponse(BaseModel):

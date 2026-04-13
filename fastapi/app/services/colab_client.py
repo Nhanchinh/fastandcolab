@@ -101,7 +101,7 @@ class ColabClient:
         
         Args:
             text: Văn bản cần tóm tắt (đã qua preprocessing)
-            model: Loại model (phobert_vit5, vit5, qwen)
+            model: Loại model (vit5_fin, qwen, phobert_finance)
             max_length: Độ dài tối đa của tóm tắt
             preprocessed_sentences: Danh sách câu (cho hybrid model)
             

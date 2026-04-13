@@ -63,7 +63,7 @@ async def create_history(
     
     - **input_text**: Văn bản gốc (tối thiểu 10 ký tự)
     - **summary**: Bản tóm tắt đã tạo
-    - **model_used**: Model đã sử dụng (vit5, phobert_vit5, qwen)
+    - **model_used**: Model đã sử dụng (vit5_fin, qwen, phobert_finance)
     - **metrics**: Các thông số (words, compression, time)
     
     Returns:

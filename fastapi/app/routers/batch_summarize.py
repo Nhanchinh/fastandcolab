@@ -88,7 +88,7 @@ async def preview_file(
 @router.post("/start")
 async def start_batch_summarize(
     file: UploadFile = File(..., description="File CSV hoặc Excel"),
-    model: str = Form(default="vit5", description="Model tóm tắt"),
+    model: str = Form(default="vit5_fin", description="Model tóm tắt"),
     max_length: int = Form(default=256, ge=50, le=512),
     text_column: str = Form(default="content", description="Tên cột chứa văn bản"),
     service: SummarizationService = Depends(get_summarization_service)
@@ -109,7 +109,7 @@ async def start_batch_summarize(
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Model không hợp lệ: {model}. Hỗ trợ: vit5, phobert_vit5, vit5_fin, qwen"
+            detail=f"Model không hợp lệ: {model}. Hỗ trợ: vit5_fin, qwen, phobert_finance"
         )
 
     try:

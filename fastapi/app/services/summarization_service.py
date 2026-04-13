@@ -56,10 +56,6 @@ class SummarizationService:
             "max_length": request.max_length,
         }
         
-        # Thêm sentences cho hybrid model
-        if model_type == "phobert_vit5" and "sentences" in preprocess_result:
-            colab_payload["preprocessed_sentences"] = preprocess_result["sentences"]
-        
         colab_response = await self.colab_client.summarize(**colab_payload)
         
         # 3. Postprocessing
@@ -104,7 +100,7 @@ class SummarizationService:
         results = []
         
         # Preprocessing chung (dùng cho tất cả models)
-        preprocessor = get_preprocessor("vit5")  # Dùng preprocessor chung
+        preprocessor = get_preprocessor("vit5_fin")  # Dùng preprocessor chung
         preprocess_result = preprocessor.preprocess(
             text=request.text,
             max_length=request.max_length
@@ -167,16 +163,6 @@ class SummarizationService:
     def get_available_models(self) -> list:
         """Lấy danh sách các model có sẵn"""
         return [
-            {
-                "id": ModelType.PHOBERT_VIT5.value,
-                "name": "PhoBERT + ViT5 (Hybrid)",
-                "description": "PhoBERT đánh giá độ quan trọng câu, ViT5 sinh tóm tắt từ top sentences"
-            },
-            {
-                "id": ModelType.VIT5.value,
-                "name": "ViT5",
-                "description": "ViT5 thuần túy - sinh tóm tắt trực tiếp từ văn bản"
-            },
             {
                 "id": ModelType.VIT5_FIN.value,
                 "name": "ViT5 Financial v2",

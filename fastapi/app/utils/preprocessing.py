@@ -4,7 +4,7 @@ Tiền xử lý văn bản cho từng loại model
 """
 
 import re
-from typing import List, Tuple
+from typing import List
 from abc import ABC, abstractmethod
 
 
@@ -79,56 +79,6 @@ class BasePreprocessor(ABC):
         pass
 
 
-class ViT5Preprocessor(BasePreprocessor):
-    """Preprocessor cho model ViT5 thuần"""
-    
-    def preprocess(self, text: str, max_length: int = 1024, **kwargs) -> dict:
-        # Clean text
-        cleaned = clean_text(text)
-        
-        # Truncate nếu quá dài (ViT5 context ~ 1024 tokens)
-        truncated = truncate_text(cleaned, max_chars=3000)
-        
-        # Thêm prefix cho ViT5
-        processed = f"summarize: {truncated}"
-        
-        return {
-            "processed_text": processed,
-            "original_length": len(text),
-            "processed_length": len(truncated),
-            "was_truncated": len(truncated) < len(cleaned)
-        }
-
-
-class PhoBertViT5Preprocessor(BasePreprocessor):
-    """Preprocessor cho model hybrid PhoBERT-ViT5"""
-    
-    def preprocess(
-        self, 
-        text: str, 
-        top_k_ratio: float = 0.6,
-        **kwargs
-    ) -> dict:
-        # Clean text
-        cleaned = clean_text(text)
-        
-        # Segment thành câu
-        sentences = segment_sentences(cleaned)
-        
-        # Limit số câu để tránh quá tải
-        max_sentences = 50
-        if len(sentences) > max_sentences:
-            sentences = sentences[:max_sentences]
-        
-        return {
-            "processed_text": cleaned,
-            "sentences": sentences,
-            "num_sentences": len(sentences),
-            "top_k_ratio": top_k_ratio,
-            "original_length": len(text)
-        }
-
-
 class QwenPreprocessor(BasePreprocessor):
     """Preprocessor cho model Qwen2.5-3B"""
     
@@ -163,17 +113,14 @@ class ViT5FinPreprocessor(BasePreprocessor):
     """Preprocessor cho model ViT5 Financial v2 (tncinh/vit5-financial-summarization-v2)"""
     
     def preprocess(self, text: str, max_length: int = 1024, **kwargs) -> dict:
-        # Clean text
         cleaned = clean_text(text)
         
-        # Truncate nếu quá dài (ViT5 context ~ 1024 tokens)
-        truncated = truncate_text(cleaned, max_chars=3000)
-        
-        # Thêm prefix cho ViT5
-        processed = f"summarize: {truncated}"
+        # Không truncate quá ngắn vì Colab server có hierarchical chunking cho text dài.
+        # Chỉ giới hạn ở mức an toàn để tránh payload quá lớn.
+        truncated = truncate_text(cleaned, max_chars=8000)
         
         return {
-            "processed_text": processed,
+            "processed_text": truncated,
             "original_length": len(text),
             "processed_length": len(truncated),
             "was_truncated": len(truncated) < len(cleaned)
@@ -212,9 +159,6 @@ class PhoBertFinancePreprocessor(BasePreprocessor):
 def get_preprocessor(model_type: str) -> BasePreprocessor:
     """Lấy preprocessor phù hợp với loại model"""
     preprocessors = {
-        "vit5": ViT5Preprocessor(),
-        "phobert_vit5": PhoBertViT5Preprocessor(),
-        "phobert_vit5_paraphrase": PhoBertViT5Preprocessor(),  # Dùng chung preprocessor với phobert_vit5
         "vit5_fin": ViT5FinPreprocessor(),
         "qwen": QwenPreprocessor(),
         "phobert_finance": PhoBertFinancePreprocessor(),

@@ -46,7 +46,7 @@ class SummarizeAndEvaluateRequest(BaseModel):
     """Request tóm tắt và đánh giá cùng lúc"""
     text: str = Field(..., min_length=10, description="Văn bản cần tóm tắt")
     reference: str = Field(..., min_length=1, description="Văn bản tham khảo để so sánh")
-    model: str = Field(default="phobert_vit5", description="Model tóm tắt: phobert_vit5, vit5, qwen")
+    model: str = Field(default="vit5_fin", description="Model tóm tắt: vit5_fin, qwen, phobert_finance")
     max_length: int = Field(default=256, ge=50, le=512, description="Độ dài tối đa của tóm tắt")
     calculate_bert: bool = Field(default=True, description="Có tính BERTScore không")
 

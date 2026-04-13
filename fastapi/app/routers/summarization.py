@@ -68,7 +68,7 @@ async def summarize(
     Tóm tắt văn bản tiếng Việt.
     
     - **text**: Văn bản cần tóm tắt (tối thiểu 10 ký tự)
-    - **model**: Loại model sử dụng (phobert_vit5, vit5, qwen)
+    - **model**: Loại model sử dụng (vit5_fin, qwen, phobert_finance)
     - **max_length**: Độ dài tối đa của bản tóm tắt (50-512)
     
     Returns:
@@ -102,7 +102,7 @@ async def compare_models(
     So sánh kết quả tóm tắt của nhiều models.
     
     - **text**: Văn bản cần tóm tắt
-    - **models**: Danh sách models muốn so sánh (mặc định: vit5, phobert_vit5, qwen)
+    - **models**: Danh sách models muốn so sánh (mặc định: vit5_fin, qwen, phobert_finance)
     - **max_length**: Độ dài tối đa
     
     Chạy tuần tự từng model để tiết kiệm RAM/GPU.
@@ -237,7 +237,7 @@ async def get_models(
 @router.post("/batch-upload", response_model=BatchUploadResponse)
 async def batch_upload(
     file: UploadFile = File(..., description="File CSV hoặc Excel chứa dataset"),
-    model: str = Form(default="vit5", description="Model sử dụng: vit5, phobert_vit5, qwen"),
+    model: str = Form(default="vit5_fin", description="Model sử dụng: vit5_fin, qwen, phobert_finance"),
     max_length: int = Form(default=256, ge=50, le=512),
     text_column: str = Form(default="text", description="Tên cột chứa văn bản cần tóm tắt"),
     reference_column: Optional[str] = Form(default=None, description="Tên cột chứa tóm tắt tham chiếu (optional)"),
@@ -277,7 +277,7 @@ async def batch_upload(
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid model: {model}. Supported: vit5, phobert_vit5, qwen"
+            detail=f"Invalid model: {model}. Supported: vit5_fin, qwen, phobert_finance"
         )
     
     try:

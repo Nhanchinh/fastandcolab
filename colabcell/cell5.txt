@@ -3,34 +3,42 @@
 from typing import List
 import re
 
-def chunk_text_by_tokens(text: str, tokenizer, max_tokens: int = 800, overlap_tokens: int = 100) -> List[str]:
+def chunk_text_by_sentences(text: str, tokenizer, max_tokens: int = 800) -> List[str]:
     """
-    Chia text dài thành các chunks dựa trên số tokens.
-    Mỗi chunk ≤ max_tokens, overlap giữa các chunks để không mất ngữ cảnh.
+    Chia text dài thành các chunks dựa trên ranh giới câu.
+    Mỗi chunk ≤ max_tokens, KHÔNG cắt giữa câu để tránh mất ngữ cảnh.
     """
-    # Tokenize toàn bộ text
-    all_tokens = tokenizer.encode(text, add_special_tokens=False)
-    
-    if len(all_tokens) <= max_tokens:
+    sentences = re.split(r'(?<=[.!?…])\s+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if not sentences:
         return [text]
-    
+
+    total_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+    if total_tokens <= max_tokens:
+        return [text]
+
     chunks = []
-    start = 0
-    while start < len(all_tokens):
-        end = min(start + max_tokens, len(all_tokens))
-        chunk_tokens = all_tokens[start:end]
-        chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-        chunks.append(chunk_text.strip())
-        
-        # Di chuyển start, trừ overlap để giữ ngữ cảnh
-        start = end - overlap_tokens
-        if start >= len(all_tokens):
-            break
-        # Tránh vòng lặp vô hạn nếu overlap >= max_tokens
-        if end == len(all_tokens):
-            break
-    
-    return chunks
+    current_sentences = []
+    current_token_count = 0
+
+    for sent in sentences:
+        sent_tokens = len(tokenizer.encode(sent, add_special_tokens=False))
+
+        if current_token_count + sent_tokens > max_tokens and current_sentences:
+            chunks.append(" ".join(current_sentences))
+            # Giữ câu cuối của chunk trước làm overlap (context bridge)
+            last_sent = current_sentences[-1]
+            current_sentences = [last_sent]
+            current_token_count = len(tokenizer.encode(last_sent, add_special_tokens=False))
+
+        current_sentences.append(sent)
+        current_token_count += sent_tokens
+
+    if current_sentences:
+        chunks.append(" ".join(current_sentences))
+
+    return chunks if chunks else [text]
 
 
 def _summarize_single_vit5(text: str, tokenizer, model, max_length: int = 256) -> str:
@@ -67,189 +75,32 @@ def _summarize_single_vit5(text: str, tokenizer, model, max_length: int = 256) -
     return summary
 
 
-def generate_vit5(text: str, max_length: int = 256) -> str:
-    """
-    Sinh tóm tắt bằng ViT5 - có hỗ trợ Hierarchical Summarization cho text dài.
-    
-    Nếu text ngắn (≤ 800 tokens): tóm tắt trực tiếp
-    Nếu text dài (> 800 tokens):
-      1. Chia thành chunks (mỗi chunk ≤ 800 tokens, overlap 100 tokens)
-      2. Tóm tắt từng chunk
-      3. Ghép các tóm tắt → tóm tắt lần cuối (Map-Reduce)
-    """
-    # Kiểm tra độ dài text
-    token_count = len(vit5_tokenizer.encode(text, add_special_tokens=False))
-    
-    if token_count <= 800:
-        # Text ngắn → tóm tắt trực tiếp
-        return _summarize_single_vit5(text, vit5_tokenizer, vit5_model, max_length)
-    
-    # Text dài → Hierarchical Summarization
-    print(f"📄 Text dài ({token_count} tokens) → Chia thành chunks để tóm tắt...")
-    
-    chunks = chunk_text_by_tokens(text, vit5_tokenizer, max_tokens=800, overlap_tokens=100)
-    print(f"   📦 Chia thành {len(chunks)} chunks")
-    
-    # Bước 1 (Map): Tóm tắt từng chunk
-    chunk_summaries = []
-    for i, chunk in enumerate(chunks):
-        print(f"   🔄 Đang tóm tắt chunk {i+1}/{len(chunks)}...")
-        summary = _summarize_single_vit5(chunk, vit5_tokenizer, vit5_model, max_length=150)
-        if summary:
-            chunk_summaries.append(summary)
-    
-    if not chunk_summaries:
-        return ""
-    
-    # Nếu chỉ có 1 chunk summary → trả luôn
-    if len(chunk_summaries) == 1:
-        return chunk_summaries[0]
-    
-    # Bước 2 (Reduce): Ghép summaries → tóm tắt lần cuối
-    combined = " ".join(chunk_summaries)
-    combined_tokens = len(vit5_tokenizer.encode(combined, add_special_tokens=False))
-    
-    print(f"   🔗 Ghép {len(chunk_summaries)} summaries ({combined_tokens} tokens) → Tóm tắt lần cuối...")
-    
-    # Nếu combined vẫn quá dài, đệ quy
-    if combined_tokens > 800:
-        return generate_vit5(combined, max_length)
-    
-    final_summary = _summarize_single_vit5(combined, vit5_tokenizer, vit5_model, max_length)
-    print(f"   ✅ Hoàn thành tóm tắt hierarchical!")
-    
-    return final_summary
-
-
-def score_sentences_with_phobert(sentences: List[str]) -> List[tuple]:
-    """Đánh giá độ quan trọng của từng câu bằng PhoBERT"""
-    scored = []
-
-    for sent in sentences:
-        inputs = phobert_tokenizer(
-            sent,
-            return_tensors="pt",
-            max_length=256,
-            truncation=True,
-            padding=True
-        ).to(device)
-
-        with torch.no_grad():
-            outputs = phobert_model(**inputs)
-            score = outputs.last_hidden_state.mean().item()
-
-        scored.append((score, sent))
-
-    return scored
-
-
-def generate_phobert_vit5(sentences: List[str], max_length: int = 256) -> str:
-    """Sinh tóm tắt hybrid: PhoBERT ranking + ViT5 generation"""
-    if not sentences:
-        return ""
-
-    scored = score_sentences_with_phobert(sentences)
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    top_k = max(1, int(len(scored) * 0.6))
-    selected = [s for _, s in scored[:top_k]]
-    combined_text = " ".join(selected)
-
-    return generate_vit5(combined_text, max_length)
-
-
-def paraphrase_chunk(text: str, max_length: int = 256) -> str:
-    """Paraphrase một chunk text bằng ViT5 Paraphrase"""
-    # Thêm prefix "làm mượt: "
-    input_text = "làm mượt: " + text.strip()
-
-    inputs = paraphrase_tokenizer(
-        input_text,
-        return_tensors="pt",
-        max_length=256,
-        truncation=True
-    ).to(device)
-
-    outputs = paraphrase_model.generate(
-        **inputs,
-        max_length=max_length,
-        min_length=20,
-        num_beams=5,
-        repetition_penalty=1.1,
-        early_stopping=True
-    )
-
-    result = paraphrase_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    # Fix lỗi tokenizer (COVID-19 -> Saxifrag-19)
-    result = result.replace("Saxifrag-19", "COVID-19")
-    result = result.replace("Saxifrag", "COVID")
-
-    return result.strip()
-
-
-def generate_phobert_vit5_paraphrase(sentences: List[str], max_length: int = 256, chunk_size: int = 3) -> str:
-    """
-    Sinh tóm tắt hybrid: PhoBERT extract + ViT5 Paraphrase
-
-    Pipeline:
-    1. PhoBERT đánh giá và chọn câu quan trọng
-    2. Chia thành chunks (mỗi chunk 3 câu)
-    3. ViT5 Paraphrase làm mượt từng chunk với prefix "làm mượt: "
-    4. Ghép các chunks lại
-    """
-    if not sentences:
-        return ""
-
-    # Step 1: PhoBERT scoring và ranking
-    scored = score_sentences_with_phobert(sentences)
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    # Lấy top 60% câu quan trọng
-    top_k = max(1, int(len(scored) * 0.6))
-    selected = [s for _, s in scored[:top_k]]
-
-    # Step 2: Chia thành chunks và paraphrase
-    paraphrased_parts = []
-
-    for i in range(0, len(selected), chunk_size):
-        chunk_sentences = selected[i:i + chunk_size]
-        raw_chunk = " ".join(chunk_sentences)
-
-        # Step 3: Paraphrase chunk
-        smooth_chunk = paraphrase_chunk(raw_chunk, max_length=max_length)
-        paraphrased_parts.append(smooth_chunk)
-
-    # Step 4: Ghép lại
-    final_text = " ".join(paraphrased_parts)
-
-    return final_text
-
-
 def generate_vit5_fin(text: str, max_length: int = 256) -> str:
     """
     Sinh tóm tắt bằng ViT5 Financial v2 - có hỗ trợ Hierarchical Summarization cho text dài.
     
-    Tương tự generate_vit5 nhưng dùng model financial.
+    Cải tiến:
+    - Tách chunk theo ranh giới câu (không cắt giữa câu)
+    - Per-chunk summary dài hơn (200 tokens) để giữ nhiều thông tin
+    - Reduce step chỉ chạy 1 lần (không đệ quy) để tránh mất ngữ cảnh
     """
-    # Kiểm tra độ dài text
     token_count = len(vit5_fin_tokenizer.encode(text, add_special_tokens=False))
     
     if token_count <= 800:
-        # Text ngắn → tóm tắt trực tiếp
         return _summarize_single_vit5(text, vit5_fin_tokenizer, vit5_fin_model, max_length)
     
-    # Text dài → Hierarchical Summarization
-    print(f"📄 [ViT5-Fin] Text dài ({token_count} tokens) → Chia thành chunks...")
+    print(f"📄 [ViT5-Fin] Text dài ({token_count} tokens) → Chia thành chunks theo câu...")
     
-    chunks = chunk_text_by_tokens(text, vit5_fin_tokenizer, max_tokens=800, overlap_tokens=100)
-    print(f"   📦 Chia thành {len(chunks)} chunks")
+    chunks = chunk_text_by_sentences(text, vit5_fin_tokenizer, max_tokens=800)
+    print(f"   📦 Chia thành {len(chunks)} chunks (theo ranh giới câu)")
     
-    # Bước 1 (Map): Tóm tắt từng chunk
+    # Map: Tóm tắt từng chunk với max_length lớn hơn để giữ nhiều thông tin
+    per_chunk_length = max(150, max_length // len(chunks) + 80)
+    
     chunk_summaries = []
     for i, chunk in enumerate(chunks):
-        print(f"   🔄 Đang tóm tắt chunk {i+1}/{len(chunks)}...")
-        summary = _summarize_single_vit5(chunk, vit5_fin_tokenizer, vit5_fin_model, max_length=150)
+        print(f"   🔄 Đang tóm tắt chunk {i+1}/{len(chunks)} (max {per_chunk_length} tokens)...")
+        summary = _summarize_single_vit5(chunk, vit5_fin_tokenizer, vit5_fin_model, max_length=per_chunk_length)
         if summary:
             chunk_summaries.append(summary)
     
@@ -259,14 +110,18 @@ def generate_vit5_fin(text: str, max_length: int = 256) -> str:
     if len(chunk_summaries) == 1:
         return chunk_summaries[0]
     
-    # Bước 2 (Reduce): Ghép summaries → tóm tắt lần cuối
+    # Reduce: Ghép summaries → tóm tắt lần cuối (1 lần duy nhất, không đệ quy)
     combined = " ".join(chunk_summaries)
     combined_tokens = len(vit5_fin_tokenizer.encode(combined, add_special_tokens=False))
     
     print(f"   🔗 Ghép {len(chunk_summaries)} summaries ({combined_tokens} tokens) → Tóm tắt lần cuối...")
     
-    if combined_tokens > 800:
-        return generate_vit5_fin(combined, max_length)
+    if combined_tokens > 1024:
+        # Nếu combined quá dài, cắt bớt thay vì đệ quy
+        combined = vit5_fin_tokenizer.decode(
+            vit5_fin_tokenizer.encode(combined, add_special_tokens=False)[:900],
+            skip_special_tokens=True
+        )
     
     final_summary = _summarize_single_vit5(combined, vit5_fin_tokenizer, vit5_fin_model, max_length)
     print(f"   ✅ Hoàn thành tóm tắt hierarchical [ViT5-Fin]!")
@@ -368,7 +223,7 @@ def generate_phobert_finance(text: str, max_length: int = 256) -> str:
         return text.strip()[:500].strip()
 
     # Xác định số câu cần chọn dựa trên max_length
-    # max_length ở đây đóng vai trò gợi ý (extractive không kiểm soát chính xác word count)
+    # Giữ tỉ lệ nén hợp lý (~30-40% số câu gốc) để thực sự tóm tắt
     if max_length <= 100:
         lo, hi = 2, 3
     elif max_length <= 200:
@@ -376,7 +231,11 @@ def generate_phobert_finance(text: str, max_length: int = 256) -> str:
     elif max_length <= 350:
         lo, hi = 4, 7
     else:
-        lo, hi = 5, 10
+        lo, hi = 5, 8
+
+    # Với văn bản dài, giới hạn tối đa ~35% số câu để tránh output quá dài
+    max_k = max(3, int(len(sents) * 0.35))
+    hi = min(hi, max_k)
 
     k = min(len(sents), max(lo, min(hi, len(sents))))
 
@@ -433,9 +292,6 @@ def generate_phobert_finance(text: str, max_length: int = 256) -> str:
 
 
 print("✅ Các hàm generate đã sẵn sàng!")
-print("   - generate_vit5")
-print("   - generate_phobert_vit5")
-print("   - generate_phobert_vit5_paraphrase")
-print("   - generate_vit5_fin ⭐ UPDATED")
+print("   - generate_vit5_fin")
 print("   - generate_qwen")
-print("   - generate_phobert_finance ⭐ NEW (Extractive)")
+print("   - generate_phobert_finance (Extractive)")

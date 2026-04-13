@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 # Types
 RatingType = Literal["good", "bad", "neutral"]
-ModelType = Literal["vit5", "phobert_vit5", "phobert_vit5_paraphrase", "vit5_fin", "qwen"]
+ModelType = Literal["vit5_fin", "qwen", "phobert_finance", "vit5", "phobert_vit5", "phobert_vit5_paraphrase"]
 
 
 # ============= Request Schemas =============
@@ -177,7 +177,7 @@ class AnalyticsResponse(BaseModel):
     total_with_feedback: int
     feedback_rate: float
     rating_distribution: dict  # {"good": x, "bad": y, "neutral": z}
-    model_distribution: dict  # {"vit5": x, "phobert_vit5": y, ...}
+    model_distribution: dict  # {"vit5_fin": x, "qwen": y, "phobert_finance": z}
     model_stats: List[ModelStats]
     daily_counts: List[DailyCount]  # 30 ngày gần nhất
     avg_compression_ratio: float
