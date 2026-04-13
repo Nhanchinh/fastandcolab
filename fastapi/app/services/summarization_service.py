@@ -186,6 +186,11 @@ class SummarizationService:
                 "id": ModelType.QWEN.value,
                 "name": "Qwen2.5-7B",
                 "description": "Mô hình ngôn ngữ lớn Qwen 7B - hỗ trợ văn bản dài"
+            },
+            {
+                "id": ModelType.PHOBERT_FINANCE.value,
+                "name": "PhoBERT Finance (Extractive)",
+                "description": "PhoBERT fine-tuned extractive - chọn câu quan trọng từ văn bản tài chính gốc"
             }
         ]
 

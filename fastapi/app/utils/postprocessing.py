@@ -261,6 +261,25 @@ class ViT5FinPostprocessor(BasePostprocessor):
         }
 
 
+class PhoBertFinancePostprocessor(BasePostprocessor):
+    """Postprocessor cho model PhoBERT Finance Extractive.
+    
+    Extractive model trả về câu gốc → ít cần postprocessing hơn.
+    Chỉ cần clean whitespace và đảm bảo kết thúc bằng dấu chấm.
+    """
+    
+    def postprocess(self, summary: str, **kwargs) -> dict:
+        # Clean whitespace cơ bản
+        cleaned = clean_output(summary)
+        
+        return {
+            "summary": cleaned,
+            "original_length": len(summary),
+            "processed_length": len(cleaned),
+            "model_type": "extractive"
+        }
+
+
 # Factory function
 def get_postprocessor(model_type: str) -> BasePostprocessor:
     """Lấy postprocessor phù hợp với loại model"""
@@ -270,6 +289,7 @@ def get_postprocessor(model_type: str) -> BasePostprocessor:
         "phobert_vit5_paraphrase": PhoBertViT5Postprocessor(),  # Dùng chung postprocessor với phobert_vit5
         "vit5_fin": ViT5FinPostprocessor(),
         "qwen": QwenPostprocessor(),
+        "phobert_finance": PhoBertFinancePostprocessor(),
     }
     
     if model_type not in postprocessors:

@@ -342,9 +342,100 @@ def generate_qwen(text: str, max_length: int = 256) -> str:
     return response
 
 
+def _split_sentences_finance(text: str) -> list:
+    """Tách câu cho extractive summarization (PhoBERT Finance)"""
+    t = text.strip()
+    if not t:
+        return []
+    chunks = re.split(r'(?<=[.!?…])\s+|\n+', t)
+    return [c.strip() for c in chunks if c.strip()]
+
+
+def generate_phobert_finance(text: str, max_length: int = 256) -> str:
+    """
+    Sinh tóm tắt extractive bằng PhoBERT Finance.
+
+    Pipeline:
+    1. Tách văn bản thành câu
+    2. Encode từng câu qua PhoBERT → CLS embeddings
+    3. Inter-Sentence Transformer xử lý context toàn cục
+    4. Financial Feature Extractor tạo 6 extra features
+    5. Classifier chấm điểm từng câu
+    6. Chọn top-k câu quan trọng nhất (giữ thứ tự gốc)
+    """
+    sents = _split_sentences_finance(text)
+    if len(sents) < 2:
+        return text.strip()[:500].strip()
+
+    # Xác định số câu cần chọn dựa trên max_length
+    # max_length ở đây đóng vai trò gợi ý (extractive không kiểm soát chính xác word count)
+    if max_length <= 100:
+        lo, hi = 2, 3
+    elif max_length <= 200:
+        lo, hi = 3, 5
+    elif max_length <= 350:
+        lo, hi = 4, 7
+    else:
+        lo, hi = 5, 10
+
+    k = min(len(sents), max(lo, min(hi, len(sents))))
+
+    n_doc = len(sents)
+    n_use = min(n_doc, phobert_fin_max_sents)
+    batch_sents = sents[:n_use]
+
+    # Tokenize từng câu
+    input_ids = torch.zeros(1, phobert_fin_max_sents, phobert_fin_max_sent_len, dtype=torch.long, device=device)
+    attention_mask = torch.zeros(1, phobert_fin_max_sents, phobert_fin_max_sent_len, dtype=torch.long, device=device)
+    sentence_mask = torch.zeros(1, phobert_fin_max_sents, dtype=torch.bool, device=device)
+
+    for i, sent in enumerate(batch_sents):
+        enc = phobert_fin_tokenizer(
+            sent,
+            max_length=phobert_fin_max_sent_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        input_ids[0, i] = enc["input_ids"][0].to(device)
+        attention_mask[0, i] = enc["attention_mask"][0].to(device)
+        sentence_mask[0, i] = True
+
+    # Extra financial features
+    extra = None
+    if phobert_fin_extra_dim > 0:
+        extra = torch.zeros(1, phobert_fin_max_sents, phobert_fin_extra_dim, device=device, dtype=torch.float32)
+        mat = _finance_feature_extractor.extract_matrix(batch_sents)
+        for i, row in enumerate(mat):
+            if i >= phobert_fin_max_sents:
+                break
+            for j, val in enumerate(row):
+                if j < phobert_fin_extra_dim:
+                    extra[0, i, j] = float(val)
+
+    # Predict
+    with torch.no_grad():
+        out = phobert_fin_model.predict(
+            input_ids,
+            attention_mask,
+            sentence_mask,
+            extra_features=extra,
+            threshold=0.5,
+        )
+    probs = out["probabilities"][0, :n_use]
+
+    # Chọn top-k câu theo xác suất, giữ thứ tự gốc
+    order = probs.argsort(descending=True)
+    top_idx = set(order[:k].tolist())
+    selected = [sents[i] for i in range(n_doc) if i in top_idx]
+
+    return " ".join(selected)
+
+
 print("✅ Các hàm generate đã sẵn sàng!")
 print("   - generate_vit5")
 print("   - generate_phobert_vit5")
 print("   - generate_phobert_vit5_paraphrase")
 print("   - generate_vit5_fin ⭐ UPDATED")
 print("   - generate_qwen")
+print("   - generate_phobert_finance ⭐ NEW (Extractive)")

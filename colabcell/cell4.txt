@@ -66,5 +66,267 @@ if device == "cuda":
     print(f"\n📊 VRAM đang dùng: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
     print(f"   VRAM còn trống: {(torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated()) / 1024**3:.2f} GB")
 
+print("\n🎉 TẤT CẢ MODELS CƠ BẢN ĐÃ SẴN SÀNG!")
+
+# ============================================================
+# PhoBERT Finance Extractive Summarizer
+# ============================================================
+import math
+import json
+import re as _re
+import numpy as np
+from huggingface_hub import hf_hub_download
+from functools import lru_cache
+
+# ---------- PositionalEncoding ----------
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, d_model: int, max_len: int = 200):
+        super().__init__()
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+    def forward(self, x):
+        return x + self.pe[:x.size(0)]
+
+# ---------- InterSentenceTransformer ----------
+class InterSentenceTransformer(torch.nn.Module):
+    def __init__(self, d_model, nhead=8, num_layers=2, dropout=0.1):
+        super().__init__()
+        self.pos_encoder = PositionalEncoding(d_model)
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=d_model * 4, dropout=dropout, batch_first=False
+        )
+        self.transformer_encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+    def forward(self, src, src_key_padding_mask=None):
+        src = self.pos_encoder(src)
+        return self.transformer_encoder(src, src_key_padding_mask=src_key_padding_mask)
+
+# ---------- PhoBERTSummarizer ----------
+class PhoBERTSummarizer(torch.nn.Module):
+    def __init__(self, model_name="vinai/phobert-base", freeze_phobert=True,
+                 use_inter_sent_transformer=True, inter_sent_layers=2,
+                 inter_sent_heads=8, dropout=0.1, pos_weight=5.0, extra_feature_dim=0):
+        super().__init__()
+        self.freeze_phobert = freeze_phobert
+        self.use_inter_sent_transformer = use_inter_sent_transformer
+        self.extra_feature_dim = int(extra_feature_dim)
+        self.phobert = AutoModel.from_pretrained(model_name)
+        self.hidden_size = self.phobert.config.hidden_size
+        if freeze_phobert:
+            for param in self.phobert.parameters():
+                param.requires_grad = False
+        if use_inter_sent_transformer:
+            self.inter_sent_transformer = InterSentenceTransformer(
+                d_model=self.hidden_size, nhead=inter_sent_heads,
+                num_layers=inter_sent_layers, dropout=dropout
+            )
+        else:
+            self.inter_sent_transformer = None
+        self.dropout = torch.nn.Dropout(dropout)
+        clf_in = self.hidden_size + (self.extra_feature_dim if self.extra_feature_dim > 0 else 0)
+        self.classifier = torch.nn.Linear(clf_in, 1)
+        self.pos_weight = torch.tensor([pos_weight])
+        self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+
+    def forward(self, input_ids, attention_mask, sentence_mask, extra_features=None, labels=None):
+        batch_size, num_sents, max_sent_length = input_ids.shape
+        flat_input_ids = input_ids.view(-1, max_sent_length)
+        flat_attention_mask = attention_mask.view(-1, max_sent_length)
+        if self.freeze_phobert:
+            with torch.no_grad():
+                outputs = self.phobert(input_ids=flat_input_ids, attention_mask=flat_attention_mask)
+        else:
+            outputs = self.phobert(input_ids=flat_input_ids, attention_mask=flat_attention_mask)
+        cls_embeddings = outputs.last_hidden_state[:, 0, :]
+        cls_embeddings = cls_embeddings.view(batch_size, num_sents, self.hidden_size)
+        if self.use_inter_sent_transformer:
+            cls_embeddings = cls_embeddings.transpose(0, 1)
+            padding_mask = ~sentence_mask
+            cls_embeddings = self.inter_sent_transformer(cls_embeddings, padding_mask)
+            cls_embeddings = cls_embeddings.transpose(0, 1)
+        if self.extra_feature_dim > 0:
+            if extra_features is None:
+                extra_features = torch.zeros(batch_size, num_sents, self.extra_feature_dim,
+                                             device=cls_embeddings.device, dtype=cls_embeddings.dtype)
+            cls_embeddings = torch.cat([cls_embeddings, extra_features], dim=-1)
+        cls_embeddings = self.dropout(cls_embeddings)
+        logits = self.classifier(cls_embeddings).squeeze(-1)
+        output = {'logits': logits}
+        if labels is not None:
+            if self.pos_weight.device != logits.device:
+                self.pos_weight = self.pos_weight.to(logits.device)
+                self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+            active_loss = sentence_mask.view(-1)
+            active_logits = logits.view(-1)[active_loss]
+            active_labels = labels.view(-1)[active_loss].float()
+            output['loss'] = self.loss_fn(active_logits, active_labels)
+        return output
+
+    @torch.no_grad()
+    def predict(self, input_ids, attention_mask, sentence_mask, extra_features=None, threshold=0.5):
+        self.eval()
+        outputs = self.forward(input_ids=input_ids, attention_mask=attention_mask,
+                               sentence_mask=sentence_mask, extra_features=extra_features)
+        probs = torch.sigmoid(outputs['logits'])
+        preds = (probs > threshold).long() * sentence_mask.long()
+        return {'probabilities': probs, 'predictions': preds}
+
+print("   ✅ PhoBERTSummarizer class defined!")
+
+# ---------- FinancialFeatureExtractor ----------
+class FinancialFeatureExtractor:
+    def __init__(self):
+        self.stock_tickers = {
+            'VCB','VNM','HPG','VHM','VIC','VJC','MBB','TCB','CTG','ACB',
+            'BID','MSN','VPB','FPT','GAS','PLX','SSI','MWG','VRE','VND',
+            'HDB','STB','TPB','VCG','GVR','POW','PVD','SAB','VCI','SHB'
+        }
+        self.authority_keywords_lower = {k.lower() for k in [
+            'Bộ Tài chính','Ngân hàng Nhà nước','NHNN','Chính phủ',
+            'Ủy ban Chứng khoán','UBCK','HOSE','HNX','BIDV',
+            'Vietcombank','Vietinbank','Agribank','MB',
+            'Bộ Kế hoạch và Đầu tư','Quốc hội','Thủ tướng',
+            'Thanh tra Chính phủ','Tổng cục Thuế','Bộ Công Thương',
+            'Sacombank','Techcombank','ACB','TPBank'
+        ]}
+        self.future_action_keywords = {
+            'dự báo','dự kiến','dự đoán','kế hoạch','khuyến nghị',
+            'hiệu lực','áp dụng','thực hiện','triển khai','chốt lời',
+            'tăng trưởng','giảm giá','tăng giá','mục tiêu','định hướng',
+            'chiến lược','phát triển','mở rộng','điều chỉnh','ban hành',
+            'sẽ','sắp','chuẩn bị','kỳ vọng','triển vọng'
+        }
+        self.foreign_countries = {
+            'Mỹ','Trung Quốc','Nhật Bản','Hàn Quốc','Malaysia','Singapore',
+            'Thái Lan','Indonesia','Philippines','Myanmar','Campuchia',
+            'Ấn Độ','Châu Âu','EU','Đức','Pháp','Anh','nước ngoài',
+            'thế giới','toàn cầu','quốc tế'
+        }
+        self.enumeration_regex = [_re.compile(p, _re.IGNORECASE) for p in [
+            r'^\s*Thứ\s+(nhất|hai|ba|tư|năm|sáu|bảy|tám|chín|mười)',
+            r'^\s*Một\s+là', r'^\s*Hai\s+là', r'^\s*Ba\s+là',
+            r'^\s*Bốn\s+là', r'^\s*Năm\s+là',
+            r'^\s*Bên\s+cạnh\s+đó', r'^\s*Ngoài\s+ra',
+            r'^\s*Mặt\s+khác', r'^\s*Đồng\s+thời'
+        ]]
+        self.money_pattern = _re.compile(r'\b\d+[.,\s]*\d*\s*(tỷ|triệu|nghìn|ngàn|USD|đồng|VND|đô la|đô)\b', _re.IGNORECASE)
+        self.percent_pattern = _re.compile(r'\b[\+\-]?\d+[.,]?\d*\s*%')
+        self.quantity_pattern = _re.compile(r'\b\d+[.,\s]*\d*\s*(người|doanh nghiệp|công ty|hồ sơ|đơn vị|tổ chức|ngân hàng)\b', _re.IGNORECASE)
+        self.ticker_pattern = _re.compile(r'\b[A-Z]{3}\b')
+        self.date_pattern = _re.compile(r'\b(\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{4}|tháng\s+\d{1,2}|năm\s+\d{4}|quý\s+[1-4])\b', _re.IGNORECASE)
+
+    def _sigmoid_normalize(self, value, midpoint=1.0, steepness=1.0):
+        return 1.0 / (1.0 + np.exp(-steepness * (value - midpoint)))
+
+    def extract_matrix(self, sentences):
+        n = len(sentences)
+        matrix = []
+        for idx, sent in enumerate(sentences):
+            # U-Shape Position
+            if n <= 1:
+                pos_score = 1.0
+            else:
+                position = idx / (n - 1)
+                pos_score = -4 * (position - 0.5) ** 2 + 1.0
+                if idx < 3:
+                    pos_score = min(1.0, pos_score + 0.2)
+                elif idx >= n - 2:
+                    pos_score = min(1.0, pos_score + 0.15)
+                pos_score = max(0.0, pos_score)
+            # Financial Metrics
+            cnt = len(self.money_pattern.findall(sent)) + len(self.percent_pattern.findall(sent)) + len(self.quantity_pattern.findall(sent))
+            fin_score = self._sigmoid_normalize(cnt, 3, 0.5)
+            # Authority/Tickers
+            acnt = 0
+            tickers = [t for t in self.ticker_pattern.findall(sent) if t in self.stock_tickers]
+            acnt += len(tickers)
+            sl = sent.lower()
+            for a in self.authority_keywords_lower:
+                if a in sl:
+                    acnt += 1
+            auth_score = self._sigmoid_normalize(acnt, 2, 0.6)
+            # Future/Action
+            fcnt = len(self.date_pattern.findall(sent))
+            for kw in self.future_action_keywords:
+                if kw in sl:
+                    fcnt += 1
+            future_score = self._sigmoid_normalize(fcnt, 1.5, 0.8)
+            # Enumeration Penalty
+            enum_pen = 0.0
+            stripped = sent.strip()
+            for pat in self.enumeration_regex:
+                if pat.match(stripped):
+                    enum_pen = 1.0
+                    break
+            # Context/Quote Penalty
+            ctx_pen = 0.0
+            if _re.search(r'^".*"$', stripped):
+                ctx_pen = 1.0
+            elif _re.findall(r'"([^"]{20,})"', sent):
+                ctx_pen = 1.0
+            else:
+                for c in self.foreign_countries:
+                    if c in sent:
+                        ctx_pen = 1.0
+                        break
+            matrix.append([float(pos_score), float(fin_score), float(auth_score),
+                           float(future_score), float(enum_pen), float(ctx_pen)])
+        return matrix
+
+_finance_feature_extractor = FinancialFeatureExtractor()
+print("   ✅ FinancialFeatureExtractor defined!")
+
+# ---------- Load PhoBERT Finance checkpoint ----------
+print("\n📦 Loading PhoBERT Finance Extractive (duong2110/phobert_finance_vi)...")
+
+PHOBERT_FIN_REPO = "duong2110/phobert_finance_vi"
+PHOBERT_FIN_SUBFOLDER = "phobert_finance_summarizer"
+
+cfg_path = hf_hub_download(PHOBERT_FIN_REPO, f"{PHOBERT_FIN_SUBFOLDER}/config.json")
+with open(cfg_path, encoding="utf-8") as f:
+    phobert_fin_cfg = json.load(f)
+
+phobert_fin_extra_dim = int(phobert_fin_cfg.get("extra_feature_dim", 0))
+phobert_fin_max_sent_len = int(phobert_fin_cfg.get("max_sentence_length", 128))
+phobert_fin_max_sents = int(phobert_fin_cfg.get("max_sentences", 60))
+
+phobert_fin_model = PhoBERTSummarizer(
+    model_name=phobert_fin_cfg.get("base_model", "vinai/phobert-base"),
+    freeze_phobert=True,
+    use_inter_sent_transformer=True,
+    inter_sent_layers=int(phobert_fin_cfg.get("inter_sentence_transformer_layers", 2)),
+    inter_sent_heads=int(phobert_fin_cfg.get("inter_sentence_heads", 8)),
+    extra_feature_dim=phobert_fin_extra_dim,
+)
+
+weights_path = hf_hub_download(PHOBERT_FIN_REPO, f"{PHOBERT_FIN_SUBFOLDER}/pytorch_model.bin")
+try:
+    state = torch.load(weights_path, map_location=device, weights_only=False)
+except TypeError:
+    state = torch.load(weights_path, map_location=device)
+if isinstance(state, dict) and "state_dict" in state:
+    state = state["state_dict"]
+if any(k.startswith("module.") for k in state):
+    state = {k.replace("module.", "", 1): v for k, v in state.items()}
+phobert_fin_model.load_state_dict(state, strict=True)
+
+# Tokenizer: dùng chung phobert_tokenizer đã load ở trên (vinai/phobert-base)
+# Repo checkpoint có tokenizer_config.json với model_type tùy biến → AutoTokenizer lỗi
+# → dùng tokenizer gốc PhoBERT (cùng BPE/vocab với khi train)
+phobert_fin_tokenizer = phobert_tokenizer  # Reuse!
+
+phobert_fin_model.eval()
+phobert_fin_model.to(device)
+print("   ✅ PhoBERT Finance Extractive loaded!")
+
+# In VRAM usage
+if device == "cuda":
+    print(f"\n📊 VRAM đang dùng: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    print(f"   VRAM còn trống: {(torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated()) / 1024**3:.2f} GB")
+
 print("\n🎉 TẤT CẢ MODELS ĐÃ SẴN SÀNG!")
-print("   Models: vit5, vit5_paraphrase, phobert, vit5_fin, qwen")
+print("   Models: vit5, vit5_paraphrase, phobert, vit5_fin, qwen, phobert_finance")

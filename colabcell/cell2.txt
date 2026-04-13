@@ -4,6 +4,7 @@
 # Core ML (pin versions để tránh lỗi tương thích)
 !pip install -q transformers==4.46.3 tokenizers sentencepiece
 !pip install -q torch accelerate bitsandbytes
+!pip install -q huggingface_hub numpy
 
 # API Server
 !pip install -q fastapi uvicorn pyngrok nest-asyncio

@@ -180,6 +180,34 @@ class ViT5FinPreprocessor(BasePreprocessor):
         }
 
 
+class PhoBertFinancePreprocessor(BasePreprocessor):
+    """Preprocessor cho model PhoBERT Finance Extractive (duong2110/phobert_finance_vi)"""
+    
+    def preprocess(
+        self, 
+        text: str, 
+        **kwargs
+    ) -> dict:
+        # Clean text
+        cleaned = clean_text(text)
+        
+        # Segment thành câu
+        sentences = segment_sentences(cleaned)
+        
+        # Limit số câu (model max_sentences = 60)
+        max_sentences = 60
+        if len(sentences) > max_sentences:
+            sentences = sentences[:max_sentences]
+        
+        return {
+            "processed_text": cleaned,
+            "sentences": sentences,
+            "num_sentences": len(sentences),
+            "original_length": len(text),
+            "model_type": "extractive"
+        }
+
+
 # Factory function
 def get_preprocessor(model_type: str) -> BasePreprocessor:
     """Lấy preprocessor phù hợp với loại model"""
@@ -189,6 +217,7 @@ def get_preprocessor(model_type: str) -> BasePreprocessor:
         "phobert_vit5_paraphrase": PhoBertViT5Preprocessor(),  # Dùng chung preprocessor với phobert_vit5
         "vit5_fin": ViT5FinPreprocessor(),
         "qwen": QwenPreprocessor(),
+        "phobert_finance": PhoBertFinancePreprocessor(),
     }
     
     if model_type not in preprocessors:

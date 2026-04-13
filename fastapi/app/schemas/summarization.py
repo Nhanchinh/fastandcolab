@@ -10,6 +10,7 @@ class ModelType(str, Enum):
     VIT5 = "vit5"                   # Pure ViT5
     VIT5_FIN = "vit5_fin"             # ViT5 Financial Summarization v2
     QWEN = "qwen"                   # Qwen2.5-7B
+    PHOBERT_FINANCE = "phobert_finance"  # PhoBERT Finance Extractive
 
 
 class SummarizeRequest(BaseModel):
