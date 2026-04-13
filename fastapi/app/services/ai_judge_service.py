@@ -31,8 +31,13 @@ class AIJudgeService:
         self.api_key = os.getenv("GEMINI_API_KEY")
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # Use gemini-flash-lite-latest (free tier, high rate limit)
-            self.model = genai.GenerativeModel('models/gemini-flash-lite-latest')
+            self.model = genai.GenerativeModel(
+                'gemini-2.5-flash-lite',
+                generation_config=genai.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=2048,
+                )
+            )
         else:
             self.model = None
     
@@ -65,7 +70,11 @@ class AIJudgeService:
         if not self.is_available():
             raise ValueError("Gemini API key chưa được cấu hình. Vui lòng set GEMINI_API_KEY environment variable.")
         
-        # Build the prompt
+        # Giới hạn văn bản gốc ~6000 ký tự để giảm input tokens mà vẫn đủ ngữ cảnh đánh giá
+        MAX_ORIGINAL_CHARS = 6000
+        if len(original_text) > MAX_ORIGINAL_CHARS:
+            original_text = original_text[:MAX_ORIGINAL_CHARS] + "\n[... phần còn lại đã được lược bỏ ...]"
+        
         summaries_text = ""
         model_names_list = []
         for i, s in enumerate(summaries, 1):
@@ -136,10 +145,9 @@ Lưu ý:
 - model_analyses phải có đúng {len(summaries)} phần tử, mỗi model 1 phần tử"""
 
         try:
-            response = self.model.generate_content(prompt)
+            response = await self.model.generate_content_async(prompt)
             response_text = response.text.strip()
             
-            # Try to extract JSON from response
             json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
             if json_match:
                 response_text = json_match.group(1)
@@ -211,7 +219,7 @@ Hãy viết một bản tóm tắt CHẤT LƯỢNG CAO cho văn bản sau.
 Chỉ trả về bản tóm tắt, không thêm giải thích hay ghi chú gì khác."""
 
         try:
-            response = self.model.generate_content(prompt)
+            response = await self.model.generate_content_async(prompt)
             summary = response.text.strip()
             
             # Clean up markdown formatting if any
