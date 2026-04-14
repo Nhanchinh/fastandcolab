@@ -41,6 +41,22 @@ def parse_upload_file(file_content: bytes, filename: str, text_column: str) -> p
     return df
 
 
+def get_optional_reference(row: pd.Series) -> str:
+    """Lấy giá trị reference nếu có (không phân biệt hoa/thường), ngược lại trả về rỗng."""
+    reference_col = None
+    for col in row.index:
+        if str(col).strip().lower() == "reference":
+            reference_col = col
+            break
+    if reference_col is None:
+        return ""
+
+    reference_value = row.get(reference_col)
+    if pd.isna(reference_value):
+        return ""
+    return str(reference_value).strip()
+
+
 @router.post("/preview")
 async def preview_file(
     file: UploadFile = File(..., description="File CSV hoặc Excel"),
@@ -133,6 +149,7 @@ async def start_batch_summarize(
 
         for idx, row in df.iterrows():
             text = str(row[text_column]).strip()
+            reference = get_optional_reference(row)
             item_start = time.time()
 
             if not text or len(text) < 10 or text == 'nan':
@@ -143,6 +160,7 @@ async def start_batch_summarize(
                     "success": False,
                     "error": "Văn bản quá ngắn hoặc rỗng",
                     "original_text": text or "",
+                    "reference": reference,
                     "summary": "",
                     "inference_time_s": 0,
                     "progress": round((int(idx) + 1) / total_rows * 100, 1),
@@ -170,6 +188,7 @@ async def start_batch_summarize(
                     "index": int(idx),
                     "success": True,
                     "original_text": text,
+                    "reference": reference,
                     "summary": response.summary,
                     "inference_time_s": item_time,
                     "progress": round((int(idx) + 1) / total_rows * 100, 1),
@@ -191,6 +210,7 @@ async def start_batch_summarize(
                     "success": False,
                     "error": str(e)[:200],
                     "original_text": text,
+                    "reference": reference,
                     "summary": "",
                     "inference_time_s": item_time,
                     "progress": round((int(idx) + 1) / total_rows * 100, 1),
