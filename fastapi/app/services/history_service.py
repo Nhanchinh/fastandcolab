@@ -3,7 +3,10 @@ History Service
 Business logic cho quản lý lịch sử tóm tắt và feedback
 """
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# Vietnam timezone (UTC+7)
+VN_TZ = timezone(timedelta(hours=7))
 from typing import Dict, List, Optional
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -57,7 +60,7 @@ class HistoryService:
     
     async def save_history(self, data: HistoryCreate, user_id: Optional[str] = None) -> HistoryResponse:
         """Lưu lịch sử tóm tắt mới"""
-        now = datetime.utcnow()
+        now = datetime.now(VN_TZ)
         
         doc = {
             "user_id": user_id,
@@ -171,7 +174,7 @@ class HistoryService:
     async def add_feedback(self, history_id: str, feedback: FeedbackCreate) -> Optional[HistoryResponse]:
         """Thêm hoặc cập nhật feedback cho history entry"""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(VN_TZ)
             
             feedback_doc = {
                 "rating": feedback.rating,
@@ -233,7 +236,7 @@ class HistoryService:
         return ExportDatasetResponse(
             total_items=len(items),
             items=items,
-            exported_at=datetime.utcnow()
+            exported_at=datetime.now(VN_TZ)
         )
     
     async def export_human_eval(
@@ -284,7 +287,7 @@ class HistoryService:
         return HumanEvalExportResponse(
             total_items=len(items),
             items=items,
-            exported_at=datetime.utcnow()
+            exported_at=datetime.now(VN_TZ)
         )
     
     def _doc_to_response(self, doc: Dict) -> HistoryResponse:
@@ -381,7 +384,7 @@ class HistoryService:
         - Nếu user_id được truyền vào: chỉ tính stats cho user đó
         - Nếu consented_user_ids được truyền (admin mode): chỉ tính từ các user đồng ý chia sẻ
         """
-        from datetime import timedelta
+        # timedelta already imported at module level
         
         # Base query for filtering
         if user_id:
@@ -484,7 +487,7 @@ class HistoryService:
             ))
         
         # Daily counts (last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now(VN_TZ) - timedelta(days=30)
         daily_match = {**base_query, "created_at": {"$gte": thirty_days_ago}} if base_query else {"created_at": {"$gte": thirty_days_ago}}
         daily_pipeline = [
             {"$match": daily_match},
