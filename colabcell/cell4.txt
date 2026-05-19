@@ -18,7 +18,9 @@ if device == "cuda":
 # Load ViT5 Financial v2 (Financial Summarization)
 print("\n📦 Loading ViT5 Financial v2 (tncinh/vit5-financial-summarization-v2)...")
 vit5_fin_tokenizer = AutoTokenizer.from_pretrained("VietAI/vit5-base", use_fast=False)
-vit5_fin_model = AutoModelForSeq2SeqLM.from_pretrained("tncinh/vit5-financial-summarization-v2").to(device)
+vit5_fin_model = AutoModelForSeq2SeqLM.from_pretrained(
+    "tncinh/vit5-financial-summarization-clean-v2"
+).to(device)
 print("   ✅ ViT5 Financial v2 loaded!")
 
 # Load Qwen 7B với 4-bit quantization để tiết kiệm VRAM
