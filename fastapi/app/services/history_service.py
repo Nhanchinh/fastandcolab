@@ -4,10 +4,8 @@ Business logic cho quản lý lịch sử tóm tắt và feedback
 """
 
 from datetime import datetime, timezone, timedelta
-
-# Vietnam timezone (UTC+7)
-VN_TZ = timezone(timedelta(hours=7))
 from typing import Dict, List, Optional
+
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -31,11 +29,26 @@ from app.schemas.history import (
     HumanEvalExportResponse
 )
 
+# Vietnam timezone (UTC+7)
+VN_TZ = timezone(timedelta(hours=7))
+UTC_TZ = timezone.utc
+
 
 class HistoryService:
     """Service xử lý logic lịch sử tóm tắt"""
     
     COLLECTION_NAME = "summary_history"
+
+    @staticmethod
+    def _to_vietnam_time(value: datetime) -> datetime:
+        """
+        MongoDB stores datetimes as UTC and Motor returns them without tzinfo
+        unless tz-aware decoding is enabled. Treat naive values as UTC before
+        converting them for API responses.
+        """
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC_TZ)
+        return value.astimezone(VN_TZ)
     
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
@@ -274,7 +287,7 @@ class HistoryService:
             items.append(HumanEvalExportItem(
                 summary=doc["summary"],
                 model_used=doc["model_used"],
-                created_at=doc["created_at"],
+                created_at=self._to_vietnam_time(doc["created_at"]),
                 fluency=human_eval.get("fluency"),
                 coherence=human_eval.get("coherence"),
                 relevance=human_eval.get("relevance"),
@@ -311,7 +324,7 @@ class HistoryService:
                 rating=feedback_data["rating"],
                 comment=feedback_data.get("comment"),
                 corrected_summary=feedback_data.get("corrected_summary"),
-                feedback_at=feedback_data["feedback_at"],
+                feedback_at=self._to_vietnam_time(feedback_data["feedback_at"]),
                 human_eval=human_eval
             )
         
@@ -320,7 +333,7 @@ class HistoryService:
             input_text=doc["input_text"],
             summary=doc["summary"],
             model_used=doc["model_used"],
-            created_at=doc["created_at"],
+            created_at=self._to_vietnam_time(doc["created_at"]),
             metrics=MetricsResponse(
                 input_words=metrics_data.get("input_words", 0),
                 output_words=metrics_data.get("output_words", 0),
@@ -492,7 +505,13 @@ class HistoryService:
         daily_pipeline = [
             {"$match": daily_match},
             {"$group": {
-                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+                "_id": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d",
+                        "date": "$created_at",
+                        "timezone": "Asia/Ho_Chi_Minh"
+                    }
+                },
                 "count": {"$sum": 1}
             }},
             {"$sort": {"_id": 1}}

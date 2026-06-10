@@ -22,7 +22,9 @@ class HistoryCreate(BaseModel):
     model_used: ModelType = Field(..., description="Model đã sử dụng")
     input_words: int = Field(default=0, ge=0)
     output_words: int = Field(default=0, ge=0)
-    compression_ratio: float = Field(default=0.0, ge=0, le=100)
+    # Derived clients may report reduction percentage (can be negative when
+    # output is longer) or output/input percentage (can exceed 100).
+    compression_ratio: float = Field(default=0.0, allow_inf_nan=False)
     processing_time_ms: int = Field(default=0, ge=0)
     colab_inference_ms: Optional[float] = Field(default=None, ge=0)
 
